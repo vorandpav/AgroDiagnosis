@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[codz]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+
+# Secrets and local config
+.env
+
+# Tool caches & Coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+coverage.xml
+htmlcov/
+.coverage
+
+# IDEs
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Operating Systems
+.DS_Store
+
+# Logs
+*.log
+logs/
