@@ -5,10 +5,24 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 
+class HelloResponse(BaseModel):
+    """Response schema for the root endpoint."""
+
+    message: str = Field(default="Hello, world!", description="Welcome greeting message.")
+    app: str = Field(description="Name of the application.")
+    version: str = Field(description="Application semantic version.")
+
+
 class LivenessResponse(BaseModel):
     """Response model for the lightweight liveness probe."""
 
     status: str = Field(default="ok", description="Process liveness indicator.")
+
+
+class VersionResponse(BaseModel):
+    """Response model for the application version endpoint."""
+
+    version: str = Field(description="Application version.")
 
 
 class HealthStatus(StrEnum):

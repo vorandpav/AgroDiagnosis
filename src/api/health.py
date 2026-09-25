@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Request, Response, status
 
-from src.schemas import HealthReport, LivenessResponse, ReportStatus
+from src.schemas import HealthReport, LivenessResponse, ReportStatus, VersionResponse
 from src.services import health as health_service
 
 log = logging.getLogger(__name__)
@@ -25,8 +25,8 @@ async def liveness() -> LivenessResponse:
     return LivenessResponse(status="ok")
 
 
-@router.get("/api/v1/version")
-async def get_version(request: Request) -> dict[str, str]:
+@router.get("/api/v1/version", response_model=VersionResponse)
+async def get_version(request: Request) -> VersionResponse:
     """Returns current application version metadata.
 
     Dynamically retrieves version information from application settings.
@@ -35,9 +35,9 @@ async def get_version(request: Request) -> dict[str, str]:
         request: FastAPI HTTP request instance.
 
     Returns:
-        dict[str, str]: Dictionary containing the application version string.
+        VersionResponse: The application version string.
     """
-    return {"version": request.app.state.settings.version}
+    return VersionResponse(version=request.app.state.settings.version)
 
 
 @router.get("/api/v1/health", response_model=HealthReport)

@@ -33,13 +33,13 @@ async def check_postgres(pool: Pool) -> DependencyHealth:
         pool: Active asyncpg connection pool.
 
     Returns:
-        DependencyHealth: Health status and version details (or error description).
+        DependencyHealth: Health status and version or error details.
     """
     try:
         version = await pool.fetchval("SELECT version()")
     except (OSError, PostgresError, TimeoutError) as exc:
-        detail = f"{type(exc).__name__}: {exc}"
-        return DependencyHealth(status=HealthStatus.unavailable, detail=detail)
+        log.warning("Postgres health check failed: %s", exc)
+        return DependencyHealth(status=HealthStatus.unavailable, detail="Postgres is unavailable")
     return DependencyHealth(status=HealthStatus.healthy, detail=str(version).split(",")[0])
 
 

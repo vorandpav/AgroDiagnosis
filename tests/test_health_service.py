@@ -25,7 +25,7 @@ async def test_check_postgres_unavailable_on_error() -> None:
     """Verifies that connection failures are caught and marked as unavailable."""
     dependency = await health_service.check_postgres(_DeadPool())  # type: ignore[arg-type]
     assert dependency.status is HealthStatus.unavailable
-    assert "OSError" in (dependency.detail or "")
+    assert "Postgres is unavailable" in (dependency.detail or "")
 
 
 async def test_build_report_degraded_when_dependency_down() -> None:
