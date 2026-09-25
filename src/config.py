@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
 
 def get_settings() -> Settings:
-    """Returns a singleton instance of the application settings.
+    """Returns an instance of the application settings.
 
     Used for Dependency Injection in FastAPI and to fetch the current
     configuration anywhere across the project.
