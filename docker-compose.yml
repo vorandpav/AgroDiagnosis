@@ -56,9 +56,33 @@ services:
       - agrodiagnosis-network
     restart: unless-stopped
 
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agrodiagnosis-mlflow
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - mlflow-artifacts:/app/mlartifacts
+    command: >
+      uv run mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql+psycopg2://postgres:postgres@postgres:5432/agrodiagnosis
+      --default-artifact-root /app/mlartifacts
+    networks:
+      - agrodiagnosis-network
+    restart: unless-stopped
+
 volumes:
   postgres-data:
+  mlflow-artifacts:
 
 networks:
   agrodiagnosis-network:
     driver: bridge
+

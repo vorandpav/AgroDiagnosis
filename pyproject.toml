@@ -10,6 +10,8 @@ requires-python = ">=3.12"
 dependencies = [
     "asyncpg>=0.31.0",
     "fastapi>=0.141.1",
+    "mlflow>=3.16.1",
+    "psycopg2-binary>=2.9.13",
     "pydantic-settings>=2.15.0",
     "uvicorn[standard]>=0.53.0",
 ]
