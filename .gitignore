@@ -33,3 +33,7 @@ htmlcov/
 # Logs
 *.log
 logs/
+
+data/
+mlartifacts/
+notebooks/eda.txt

@@ -67,20 +67,20 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - mlflow-artifacts:/app/mlartifacts
+      - ./mlartifacts:/mlartifacts
     command: >
       uv run mlflow server
       --host 0.0.0.0
       --port 5000
       --backend-store-uri postgresql+psycopg2://postgres:postgres@postgres:5432/agrodiagnosis
-      --default-artifact-root /app/mlartifacts
+      --artifacts-destination /mlartifacts
+      --serve-artifacts
     networks:
       - agrodiagnosis-network
     restart: unless-stopped
 
 volumes:
   postgres-data:
-  mlflow-artifacts:
 
 networks:
   agrodiagnosis-network:
