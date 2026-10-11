@@ -1,13 +1,13 @@
 # AgroDiagnosis MLflow Platform
 
-Docker Compose stack for the MLflow Tracking Server used by training and inference: dedicated Backend Store (Postgres)
-and Artifact Store (local volume).
+Docker Compose stack for the MLflow Tracking Server used by training and inference:
+dedicated Backend Store (Postgres) and Artifact Store (local volume).
 
 ## Quick Start
 
 ### 1. Environment
 
-Copy the example env file (from the repository root):
+From the repository root:
 
 ```bash
 cp deploy/mlflow/.env.example deploy/mlflow/.env
