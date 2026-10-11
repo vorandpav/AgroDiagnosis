@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     debug: bool = False
     environment: str = "development"
     database_url: str = Field(
-        default="postgresql://postgres:postgres@localhost:5432/agrodiagnosis",
+        default="postgresql://postgres:postgres@localhost:5433/agrodiagnosis",
         description="PostgreSQL connection string (asyncpg format).",
     )
 
