@@ -3,17 +3,17 @@ services:
     image: postgres:16-alpine
     container_name: agrodiagnosis-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: agrodiagnosis
-      TZ: Europe/Moscow
-      PGTZ: Europe/Moscow
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-agrodiagnosis}
+      TZ: ${TZ:-Europe/Moscow}
+      PGTZ: ${TZ:-Europe/Moscow}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d agrodiagnosis" ]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -33,11 +33,11 @@ services:
       dockerfile: Dockerfile
     container_name: agrodiagnosis-app
     environment:
-      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/agrodiagnosis"
-      LOG_LEVEL: INFO
-      ENVIRONMENT: development
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-agrodiagnosis}"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,33 +56,9 @@ services:
       - agrodiagnosis-network
     restart: unless-stopped
 
-  mlflow:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: agrodiagnosis-mlflow
-    ports:
-      - "5000:5000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./mlartifacts:/mlartifacts
-    command: >
-      uv run mlflow server
-      --host 0.0.0.0
-      --port 5000
-      --backend-store-uri postgresql+psycopg2://postgres:postgres@postgres:5432/agrodiagnosis
-      --artifacts-destination /mlartifacts
-      --serve-artifacts
-    networks:
-      - agrodiagnosis-network
-    restart: unless-stopped
-
 volumes:
   postgres-data:
 
 networks:
   agrodiagnosis-network:
     driver: bridge
-

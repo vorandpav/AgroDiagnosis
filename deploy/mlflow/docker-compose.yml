@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agrodiagnosis-mlflow-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mlflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlflow}
+      POSTGRES_DB: ${POSTGRES_DB:-mlflow}
+      TZ: ${TZ:-Europe/Moscow}
+      PGTZ: ${TZ:-Europe/Moscow}
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - mlflow-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - agrodiagnosis-mlflow-network
+    restart: unless-stopped
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agrodiagnosis-mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - ./mlartifacts:/mlartifacts
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql+psycopg2://${POSTGRES_USER:-mlflow}:${POSTGRES_PASSWORD:-mlflow}@postgres:5432/${POSTGRES_DB:-mlflow}
+      --artifacts-destination /mlartifacts
+      --serve-artifacts
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - agrodiagnosis-mlflow-network
+    restart: unless-stopped
+
+volumes:
+  mlflow-postgres-data:
+
+networks:
+  agrodiagnosis-mlflow-network:
+    driver: bridge
