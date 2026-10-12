@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "agrodiagnosis-training"
 version = "0.1.0"
@@ -8,6 +12,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "hydra-core>=1.3.2",
     "jupyter>=1.1.1",
     "kagglehub>=0.3.0",
     "matplotlib>=3.11.2",
@@ -15,11 +20,75 @@ dependencies = [
     "numpy>=2.0",
     "pandas>=2.2",
     "pillow>=12.3.0",
+    "pydantic-settings>=2.15.0",
     "scikit-learn>=1.6.0",
     "seaborn>=0.13.2",
+]
+
+# Mutually exclusive PyTorch builds (uv extras, not dependency-groups).
+# Laptop/CI:  uv sync --extra cpu
+# RTX 4060:   uv sync --extra cu124
+[project.optional-dependencies]
+cpu = [
+    "torch>=2.5.0",
+    "torchvision>=0.20.0",
+]
+cu124 = [
+    "torch>=2.5.0",
+    "torchvision>=0.20.0",
 ]
 
 [dependency-groups]
 dev = [
     "ruff>=0.16.8",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cu124" },
+    ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu124", extra = "cu124" },
+]
+torchvision = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu124", extra = "cu124" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "N", "RUF", "BLE", "ANN"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Env must be set before ``import mlflow``; keep this import first among third-party.
+"train.py" = ["I001"]
+"scripts/reset_mlflow.py" = ["BLE001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.format]
+quote-style = "double"

@@ -1,3 +1,5 @@
+"""Download the Kaggle plant-diseases archive into RAW_DATA_ROOT."""
+
 from __future__ import annotations
 
 import shutil
@@ -5,25 +7,24 @@ from pathlib import Path
 
 import kagglehub
 
-TRAINING_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = TRAINING_ROOT / "data"
-TARGET_DIR = DATA_DIR / "plant-diseases"
+from src.settings import get_settings, resolve_path
 
 
 def main() -> None:
     """Install the dataset from Kagglehub."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    target = resolve_path(get_settings().raw_data_dir)
+    target.parent.mkdir(parents=True, exist_ok=True)
 
     print("Downloading dataset via kagglehub")
     cache_path = Path(kagglehub.dataset_download("vipoooool/new-plant-diseases-dataset"))
     print(f"Cached at: {cache_path}")
 
-    if TARGET_DIR.exists():
-        print(f"Removing old {TARGET_DIR}")
-        shutil.rmtree(TARGET_DIR)
+    if target.exists():
+        print(f"Removing old {target}")
+        shutil.rmtree(target)
 
-    print(f"Copying to {TARGET_DIR}")
-    shutil.copytree(cache_path, TARGET_DIR)
+    print(f"Copying to {target}")
+    shutil.copytree(cache_path, target)
     print("Done")
 
 

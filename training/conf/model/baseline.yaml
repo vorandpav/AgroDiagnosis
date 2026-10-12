@@ -1,0 +1,4 @@
+name: baseline
+backbone: mobilenet_v3_small
+dropout: 0.2
+label_smoothing: 0.0

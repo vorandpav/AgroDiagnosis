@@ -34,7 +34,12 @@ htmlcov/
 *.log
 logs/
 
+# Training
 training/data/**
 !training/data/README.md
-deploy/mlflow/mlartifacts/
+training/outputs/
 training/notebooks/eda.txt
+training/mlflow.db
+
+# MLflow
+deploy/mlflow/mlartifacts/

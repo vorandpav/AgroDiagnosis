@@ -1,0 +1,33 @@
+defaults:
+  - data: 200per_class
+  - model: baseline
+  - _self_
+
+data_to_run:
+  - 200per_class
+  - 800per_class
+
+models_to_run:
+  - baseline
+  - dropout
+  - label_smooth
+
+mlflow:
+  experiment_name: AgroDiagnosisTraining
+  registered_model_name: agrodiagnosis-plant-disease
+
+training:
+  image_size: [ 224, 224 ]
+  batch_size: 128
+  epochs: 5
+  lr: 0.001
+  weight_decay: 0.0001
+  num_workers: 2
+  random_state: 42
+
+
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: false

@@ -1,0 +1,4 @@
+name: dropout
+backbone: mobilenet_v3_small
+dropout: 0.5
+label_smoothing: 0.0

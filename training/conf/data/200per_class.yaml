@@ -1,0 +1,3 @@
+name: 200per_class
+train_per_class: 200
+val_per_class: 50
