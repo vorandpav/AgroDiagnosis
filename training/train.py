@@ -1,18 +1,20 @@
-"""Hydra entrypoint: fine-tune and register the champion.
+"""Hydra entrypoint: one config compose = one MLflow training run.
 
 Run from training/
 
     uv sync --extra cu124
     uv run --extra cu124 python scripts/prepare_dataset.py
     uv run --extra cu124 python -u train.py
-    uv run --extra cu124 python -u train.py data_to_run=[200per_class] models_to_run=[baseline]
+    uv run --extra cu124 python -u train.py data=800per_class model=label_smooth
+    uv run --extra cu124 python -u train.py -m data=..., model=...
+    uv run --extra cu124 python scripts/promote_champion.py
 """
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
-from typing import cast
 
 # Must import before mlflow: sets env (agent hint / uv scan / progress bars).
 from src.mlflow_quiet import configure_mlflow_logging
@@ -22,11 +24,10 @@ import mlflow
 import mlflow.pytorch
 import torch
 from mlflow.entities.logged_model_input import LoggedModelInput
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from src.dataset import build_split_bundle
 from src.models import build_mobilenet_v3_small, resolve_device
-from src.register import register_champion
 from src.settings import get_settings, resolve_path
 from src.tracking import (
     build_file_manifest_dataset,
@@ -42,20 +43,14 @@ if hasattr(sys.stderr, "reconfigure"):
 
 configure_mlflow_logging()
 
+log = logging.getLogger(__name__)
+
 CONF_DIR = resolve_path(get_settings().conf_dir)
 
 
 def _image_size(cfg: DictConfig) -> tuple[int, int]:
     size = cfg.training.image_size
     return int(size[0]), int(size[1])
-
-
-def _load_group_cfg(group: str, name: str) -> DictConfig:
-    path = CONF_DIR / group / f"{name}.yaml"
-    if not path.is_file():
-        raise FileNotFoundError(f"Unknown {group} config: {path}")
-    loaded = OmegaConf.load(path)
-    return cast(DictConfig, loaded)
 
 
 def _optional_int(data_cfg: DictConfig, key: str) -> int | None:
@@ -66,28 +61,27 @@ def _optional_int(data_cfg: DictConfig, key: str) -> int | None:
 
 
 def train_and_log(
-    run_name: str,
-    model_name: str,
     *,
     cfg: DictConfig,
-    data_cfg: DictConfig,
-    model_cfg: DictConfig,
     data_dir: Path,
-    data_name: str,
     device: torch.device,
-) -> tuple[str, float]:
-    """Fine-tune one model config, log to MLflow, return model URI and val f1."""
+) -> float:
+    """Fine-tune one composed config and log to MLflow; return val f1_macro."""
+    data_name = str(cfg.data.name)
+    model_name = str(cfg.model.name)
+    run_name = f"{model_name}__{data_name}"
+
     image_size = _image_size(cfg)
-    train_per_class = _optional_int(data_cfg, "train_per_class")
-    val_per_class = _optional_int(data_cfg, "val_per_class")
+    train_per_class = _optional_int(cfg.data, "train_per_class")
+    val_per_class = _optional_int(cfg.data, "val_per_class")
     batch_size = int(cfg.training.batch_size)
     epochs = int(cfg.training.epochs)
     lr = float(cfg.training.lr)
     weight_decay = float(cfg.training.weight_decay)
     num_workers = int(cfg.training.num_workers)
     random_state = int(cfg.training.random_state)
-    dropout = float(model_cfg.dropout)
-    label_smoothing = float(model_cfg.label_smoothing)
+    dropout = float(cfg.model.dropout)
+    label_smoothing = float(cfg.model.label_smoothing)
 
     bundle = build_split_bundle(
         data_dir,
@@ -99,10 +93,15 @@ def train_and_log(
         random_state=random_state,
         pin_memory=device.type == "cuda",
     )
-    print(
-        f"[{data_name}] train_per_class={train_per_class} val_per_class={val_per_class}: "
-        f"{len(bundle.class_names)} classes "
-        f"(train={bundle.n_train}, val={bundle.n_val}, test={bundle.n_test})"
+    log.info(
+        "[%s] train_per_class=%s val_per_class=%s: %d classes (train=%d, val=%d, test=%d)",
+        data_name,
+        train_per_class,
+        val_per_class,
+        len(bundle.class_names),
+        bundle.n_train,
+        bundle.n_val,
+        bundle.n_test,
     )
 
     model = build_mobilenet_v3_small(
@@ -115,7 +114,7 @@ def train_and_log(
             {
                 "model_name": model_name,
                 "data_name": data_name,
-                "backbone": str(model_cfg.backbone),
+                "backbone": str(cfg.model.backbone),
                 "dropout": dropout,
                 "label_smoothing": label_smoothing,
                 "train_per_class": "all" if train_per_class is None else train_per_class,
@@ -132,7 +131,7 @@ def train_and_log(
                 "n_classes": len(bundle.class_names),
             }
         )
-        log_hydra_configs(cfg, data_cfg, model_cfg)
+        log_hydra_configs(cfg)
         dataset = build_file_manifest_dataset(
             paths=bundle.manifest_paths,
             class_names_per_row=bundle.manifest_classes,
@@ -187,6 +186,7 @@ def train_and_log(
             serialization_format="pickle",
             pip_requirements=["torch", "torchvision", "cloudpickle"],
         )
+        mlflow.set_tag("model_uri", model_info.model_uri)
         mlflow.log_input(
             dataset,
             context="training",
@@ -197,17 +197,20 @@ def train_and_log(
             dataset=dataset,
             model_id=model_info.model_id,
         )
-        print(
-            f"{run_name}: val_f1={result.val_metrics.f1_macro:.4f} "
-            f"test_f1={test_metrics.f1_macro:.4f} "
-            f"train_f1={result.train_metrics.f1_macro:.4f} gap={overfit_gap:.4f}"
+        log.info(
+            "%s: val_f1=%.4f test_f1=%.4f train_f1=%.4f gap=%.4f",
+            run_name,
+            result.val_metrics.f1_macro,
+            test_metrics.f1_macro,
+            result.train_metrics.f1_macro,
+            overfit_gap,
         )
-        return model_info.model_uri, result.val_metrics.f1_macro
+        return result.val_metrics.f1_macro
 
 
 @hydra.main(version_base=None, config_path=str(CONF_DIR), config_name="config")
 def main(cfg: DictConfig) -> None:
-    """Train data-model grid and promote the best val f1_macro to @champion."""
+    """Train one Hydra-composed data/model pair and log the run to MLflow."""
     settings = get_settings()
     data_dir = resolve_path(settings.data_dir)
     device = resolve_device()
@@ -215,43 +218,11 @@ def main(cfg: DictConfig) -> None:
     mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
     mlflow.set_experiment(str(cfg.mlflow.experiment_name))
 
-    print(f"Using data_dir={data_dir}")
-    print(f"Device={device}")
-    print(f"Hydra defaults demo: data={cfg.data.name}, model={cfg.model.name}")
+    log.info("Using data_dir=%s", data_dir)
+    log.info("Device=%s", device)
+    log.info("Compose: data=%s model=%s", cfg.data.name, cfg.model.name)
 
-    best_model_uri: str | None = None
-    best_f1 = -1.0
-
-    for data_name_raw in cfg.data_to_run:
-        data_name = str(data_name_raw)
-        data_cfg = _load_group_cfg("data", data_name)
-
-        for model_name_raw in cfg.models_to_run:
-            model_name = str(model_name_raw)
-            run_name = f"{model_name}__{data_name}"
-            model_cfg = _load_group_cfg("model", model_name)
-            model_uri, f1_macro = train_and_log(
-                run_name,
-                model_name,
-                cfg=cfg,
-                data_cfg=data_cfg,
-                model_cfg=model_cfg,
-                data_dir=data_dir,
-                data_name=data_name,
-                device=device,
-            )
-            if f1_macro > best_f1:
-                best_f1 = f1_macro
-                best_model_uri = model_uri
-
-    if best_model_uri is None:
-        raise RuntimeError("No training runs completed")
-
-    version = register_champion(best_model_uri, str(cfg.mlflow.registered_model_name))
-    print(
-        f"Champion val_f1_macro={best_f1:.4f} -> "
-        f"{cfg.mlflow.registered_model_name} v{version} @champion"
-    )
+    train_and_log(cfg=cfg, data_dir=data_dir, device=device)
 
 
 if __name__ == "__main__":

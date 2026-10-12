@@ -48,15 +48,9 @@ def build_file_manifest_dataset(
     )
 
 
-def log_hydra_configs(
-    cfg: DictConfig,
-    data_cfg: DictConfig,
-    model_cfg: DictConfig,
-) -> None:
-    """Log resolved Hydra configs as run artifacts."""
+def log_hydra_configs(cfg: DictConfig) -> None:
+    """Log the resolved Hydra compose as a run artifact."""
     mlflow.log_dict(OmegaConf.to_container(cfg, resolve=True), "hydra/config.yaml")
-    mlflow.log_dict(OmegaConf.to_container(data_cfg, resolve=True), "hydra/data.yaml")
-    mlflow.log_dict(OmegaConf.to_container(model_cfg, resolve=True), "hydra/model.yaml")
 
 
 def log_confusion_matrix(

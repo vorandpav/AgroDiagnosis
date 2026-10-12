@@ -29,6 +29,17 @@ Spin up the service using Docker Compose:
 make up
 ```
 
+Useful Make targets:
+
+```bash
+make mlflow-up          # Tracking Server (deploy/mlflow)
+make train-sync         # uv sync training extras (TORCH_EXTRA=cu124|cpu)
+make train              # one Hydra job
+make train-grid         # Hydra -m 3×2 grid
+make promote            # best f1_macro -> Model Registry @champion
+make process IMAGE=...  # smoke POST /process
+```
+
 ### 4. API Endpoints
 
 | Method | Endpoint        | Description                                        |
