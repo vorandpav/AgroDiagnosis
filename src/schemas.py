@@ -51,3 +51,11 @@ class HealthReport(BaseModel):
 
     status: ReportStatus
     dependencies: dict[str, DependencyHealth]
+
+
+class ProcessResponse(BaseModel):
+    """Response schema for plant-disease inference."""
+
+    label: str = Field(description="Predicted plant/disease class.")
+    confidence: float = Field(description="Softmax probability of the predicted class.")
+    model: str = Field(description="Loaded Model Registry reference (name@alias).")

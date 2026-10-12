@@ -36,6 +36,9 @@ services:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-agrodiagnosis}"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       ENVIRONMENT: ${ENVIRONMENT:-development}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://host.docker.internal:5000}
+      MLFLOW_MODEL_NAME: ${MLFLOW_MODEL_NAME:-agrodiagnosis-plant-disease}
+      MLFLOW_MODEL_ALIAS: ${MLFLOW_MODEL_ALIAS:-champion}
     ports:
       - "${APP_PORT:-8000}:8000"
     depends_on:

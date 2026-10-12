@@ -17,6 +17,9 @@ class Settings(BaseSettings):
         debug: Debug mode flag.
         environment: Deployment environment (development, production).
         database_url: PostgreSQL connection string in asyncpg format.
+        mlflow_tracking_uri: MLflow Tracking Server URI.
+        mlflow_model_name: Registered model name in Model Registry.
+        mlflow_model_alias: Alias resolved at startup (e.g. champion).
     """
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -29,6 +32,18 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql://postgres:postgres@localhost:5433/agrodiagnosis",
         description="PostgreSQL connection string (asyncpg format).",
+    )
+    mlflow_tracking_uri: str = Field(
+        default="http://localhost:5000",
+        description="MLflow Tracking Server URI.",
+    )
+    mlflow_model_name: str = Field(
+        default="agrodiagnosis-plant-disease",
+        description="Registered model name in MLflow Model Registry.",
+    )
+    mlflow_model_alias: str = Field(
+        default="champion",
+        description="Model Registry alias loaded at application startup.",
     )
 
 

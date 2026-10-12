@@ -13,6 +13,9 @@ dependencies = [
     "mlflow>=3.16.1",
     "pillow>=12.3.0",
     "pydantic-settings>=2.15.0",
+    "python-multipart>=0.0.32",
+    "torch>=2.5.0",
+    "torchvision>=0.20.0",
     "uvicorn[standard]>=0.53.0",
 ]
 
@@ -26,6 +29,15 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff>=0.16.8",
 ]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

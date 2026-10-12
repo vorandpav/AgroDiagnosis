@@ -37,5 +37,6 @@ make up
 | GET    | /healthz        | Quick liveness probe for orchestration systems     |
 | GET    | /api/v1/version | Current version                                    |
 | GET    | /api/v1/health  | Comprehensive readiness report across dependencies |
+| POST   | /process        | Plant-disease inference (multipart image `file`)   |
 
 Swagger UI is available at `/docs`.

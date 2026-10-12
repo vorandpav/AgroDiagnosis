@@ -5,8 +5,11 @@ This directory is gitignored except for this README.
 
 ## Raw layout (Kaggle)
 
-After `uv run python scripts/download_data.py` (from `training/`):
+Run:
 
+```bash
+uv run python scripts/download_data.py
+```
 ## Processed layout (training)
 
 ```bash
