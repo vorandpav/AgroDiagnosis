@@ -16,8 +16,8 @@ env:
 
 # Run setup tasks: install dependencies and configure environment
 setup:
-	install
-	env
+	make install
+	make env
 
 # Run code linters and formatting checks
 lint:
