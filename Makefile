@@ -59,7 +59,7 @@ train-sync:
 	cd training && uv sync --extra $(TORCH_EXTRA)
 
 data-prepare:
-	cd training && uv run --extra $(TORCH_EXTRA) python scripts/prepare_dataset.py
+	cd training && uv run --extra $(TORCH_EXTRA) python scripts/download_data.py && uv run --extra $(TORCH_EXTRA) python scripts/prepare_dataset.py
 
 train:
 	cd training && uv run --extra $(TORCH_EXTRA) python -u train.py

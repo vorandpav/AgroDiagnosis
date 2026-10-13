@@ -28,6 +28,7 @@ from omegaconf import DictConfig
 
 from src.dataset import build_split_bundle
 from src.models import build_mobilenet_v3_small, resolve_device
+from src.seed import set_seed
 from src.settings import get_settings, resolve_path
 from src.tracking import (
     build_file_manifest_dataset,
@@ -82,6 +83,7 @@ def train_and_log(
     random_state = int(cfg.training.random_state)
     dropout = float(cfg.model.dropout)
     label_smoothing = float(cfg.model.label_smoothing)
+    set_seed(random_state)
 
     bundle = build_split_bundle(
         data_dir,
@@ -124,6 +126,7 @@ def train_and_log(
                 "epochs": epochs,
                 "lr": lr,
                 "weight_decay": weight_decay,
+                "random_state": random_state,
                 "device": str(device),
                 "n_train": bundle.n_train,
                 "n_val": bundle.n_val,

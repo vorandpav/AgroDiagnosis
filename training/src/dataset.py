@@ -12,6 +12,8 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
+from src.seed import seed_worker
+
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
@@ -95,7 +97,7 @@ def scan_split(
         class_dir = split_dir / plant / condition
         if not class_dir.is_dir():
             continue
-        files = [p for p in class_dir.iterdir() if p.suffix.lower() == ".jpg"]
+        files = sorted(p for p in class_dir.iterdir() if p.suffix.lower() == ".jpg")
         rng.shuffle(files)
         if max_per_class is not None:
             files = files[:max_per_class]
@@ -141,6 +143,7 @@ def _make_loader(
     shuffle: bool,
     num_workers: int,
     pin_memory: bool,
+    generator: torch.Generator,
 ) -> DataLoader[tuple[torch.Tensor, torch.Tensor]]:
     kwargs: dict[str, bool | int] = {}
     if num_workers > 0:
@@ -152,6 +155,8 @@ def _make_loader(
         shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=pin_memory,
+        generator=generator,
+        worker_init_fn=seed_worker,
         **kwargs,
     )
 
@@ -192,6 +197,8 @@ def build_split_bundle(
     )
     all_samples = train_samples + val_samples + test_samples
     eval_tf = _eval_transform(image_size)
+    generator = torch.Generator()
+    generator.manual_seed(random_state)
 
     return SplitBundle(
         train_loader=_make_loader(
@@ -201,6 +208,7 @@ def build_split_bundle(
             shuffle=True,
             num_workers=num_workers,
             pin_memory=pin_memory,
+            generator=generator,
         ),
         val_loader=_make_loader(
             val_samples,
@@ -209,6 +217,7 @@ def build_split_bundle(
             shuffle=False,
             num_workers=num_workers,
             pin_memory=pin_memory,
+            generator=generator,
         ),
         test_loader=_make_loader(
             test_samples,
@@ -217,6 +226,7 @@ def build_split_bundle(
             shuffle=False,
             num_workers=num_workers,
             pin_memory=pin_memory,
+            generator=generator,
         ),
         class_names=list(class_names),
         manifest_paths=[str(s.path.relative_to(data_dir)).replace("\\", "/") for s in all_samples],
