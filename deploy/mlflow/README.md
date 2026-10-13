@@ -7,10 +7,16 @@ dedicated Backend Store (Postgres) and Artifact Store (local volume).
 
 ### 1. Environment
 
-From the repository root:
+Copy the example environment file:
 
 ```bash
 cp deploy/mlflow/.env.example deploy/mlflow/.env
+```
+
+or
+
+```bash
+make mlflow-env
 ```
 
 ### 2. Docker Deployment
@@ -21,7 +27,17 @@ Build the thin MLflow image and start the stack:
 docker compose -f deploy/mlflow/docker-compose.yml --env-file deploy/mlflow/.env up -d --build
 ```
 
-### 3. MLflow Tracking UI
+or
+
+```bash
+make mlflow-up
+```
+
+### 3. Extra commands
+
+Read [`Makefile`](Makefile) for additional commands.
+
+### 4. MLflow Tracking UI
 
 Tracking UI: http://localhost:5000
 

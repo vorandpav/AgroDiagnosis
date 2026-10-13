@@ -2,43 +2,46 @@
 
 FastAPI microservice providing application health monitoring, liveness/readiness probes, and core API entrypoints.
 
+Also watch:
+
+- [AgroDiagnosis MLflow Platform](deploy/mlflow/README.md) for the MLflow Tracking Server used by training and
+  inference;
+- [AgroDiagnosis Training Service](training/README.md) for the training service used to train and register new models.
+
 ## Quick Start
 
 ### 1. Requirements & Installation
 
-Ensure `uv` is installed on your system.
+Install dependencies and copy the example environment file:
 
 ```bash
 uv sync
 cp .env.example .env
 ```
 
-### 2. Local Execution
-
-Run the development server with hot-reload:
+or
 
 ```bash
-make run
+make setup
 ```
 
-### 3. Docker Deployment
+### 2. Docker Deployment
 
 Spin up the service using Docker Compose:
+
+```bash
+docker compose up -d --build
+```
+
+or
 
 ```bash
 make up
 ```
 
-Useful Make targets:
+### 3. Extra commands
 
-```bash
-make mlflow-up          # Tracking Server (deploy/mlflow)
-make train-sync         # uv sync training extras (TORCH_EXTRA=cu124|cpu)
-make train              # one Hydra job
-make train-grid         # Hydra -m 3×2 grid
-make promote            # best f1_macro -> Model Registry @champion
-make process IMAGE=...  # smoke POST /process
-```
+Read [`Makefile`](Makefile) for additional commands.
 
 ### 4. API Endpoints
 

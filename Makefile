@@ -1,6 +1,6 @@
-.PHONY: install lint fmt test run up down logs psq \
-	mlflow-up mlflow-down mlflow-logs \
-	train-sync data-prepare train train-grid promote process
+.PHONY: install env setup lint fmt test run up down logs psq \
+	mlflow-env mlflow-up mlflow-down mlflow-logs \
+	train-sync train-env data-prepare train train-grid promote process
 
 TORCH_EXTRA ?= cu124
 MLFLOW_COMPOSE := docker compose -f deploy/mlflow/docker-compose.yml --env-file deploy/mlflow/.env
@@ -9,6 +9,15 @@ IMAGE ?= training/data/plant-diseases-processed/test/Potato/Early_blight/PotatoE
 # Install dependencies from lockfile
 install:
 	uv sync
+
+# Configure environment variables for local development
+env:
+	cp .env.example .env
+
+# Run setup tasks: install dependencies and configure environment
+setup:
+	install
+	env
 
 # Run code linters and formatting checks
 lint:
@@ -44,6 +53,10 @@ logs:
 psq:
 	docker compose exec postgres psql -U postgres -d agrodiagnosis
 
+# Configure MLflow environment variables for local development
+mlflow-env:
+	cp deploy/mlflow/.env.example deploy/mlflow/.env
+
 # MLflow Tracking stack (separate compose)
 mlflow-up:
 	$(MLFLOW_COMPOSE) up -d --build
@@ -57,6 +70,9 @@ mlflow-logs:
 # Training package (override: make train TORCH_EXTRA=cpu)
 train-sync:
 	cd training && uv sync --extra $(TORCH_EXTRA)
+
+train-env:
+	cd training && cp .env.example .env
 
 data-prepare:
 	cd training && uv run --extra $(TORCH_EXTRA) python scripts/download_data.py && uv run --extra $(TORCH_EXTRA) python scripts/prepare_dataset.py
