@@ -24,5 +24,7 @@ async def test_health_report_degraded_when_postgres_unavailable(client: AsyncCli
     body = response.json()
     assert body["status"] == "degraded"
     assert body["dependencies"]["postgres"]["status"] == "unavailable"
+    assert body["dependencies"]["mlflow"]["status"] == "healthy"
+    assert body["dependencies"]["model"]["status"] == "healthy"
     assert body["dependencies"]["application"]["status"] == "healthy"
     assert "agrodiagnosis" in body["dependencies"]["application"]["detail"]

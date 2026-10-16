@@ -5,16 +5,18 @@ from __future__ import annotations
 import io
 import json
 import logging
+import urllib.error
 from pathlib import Path
 
-import mlflow
 import torch
 from PIL import Image
 from torch import nn
 from torchvision import transforms
 
+import mlflow
 from src.config import Settings
 from src.schemas import ProcessResponse
+from src.services.health import probe_mlflow_tracking
 
 log = logging.getLogger(__name__)
 
@@ -41,8 +43,14 @@ def load_model(settings: Settings) -> tuple[nn.Module, list[str]]:
     Returns:
         Tuple of eval-mode model and ordered class name list.
     """
-    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+    tracking_uri = settings.mlflow_tracking_uri
     uri = f"models:/{settings.mlflow_model_name}@{settings.mlflow_model_alias}"
+    try:
+        probe_mlflow_tracking(tracking_uri)
+    except (OSError, TimeoutError, urllib.error.URLError) as exc:
+        raise RuntimeError(f"MLflow Tracking Server unreachable at {tracking_uri}") from exc
+
+    mlflow.set_tracking_uri(tracking_uri)
     try:
         model = mlflow.pytorch.load_model(uri)
     except Exception as exc:
@@ -50,7 +58,6 @@ def load_model(settings: Settings) -> tuple[nn.Module, list[str]]:
 
     model.eval()
     class_names: list[str] = json.loads(_CLASS_NAMES_PATH.read_text(encoding="utf-8-sig"))
-    log.info("Loaded model %s (%d classes)", uri, len(class_names))
     return model, class_names
 
 

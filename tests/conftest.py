@@ -39,6 +39,7 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
         return _FakeModel().eval(), [f"class_{index}" for index in range(38)]
 
     monkeypatch.setattr("src.services.inference.load_model", _fake_load_model)
+    monkeypatch.setattr("src.services.health.probe_mlflow_tracking", lambda _uri: None)
 
     async with LifespanManager(app):
         transport = ASGITransport(app=app)

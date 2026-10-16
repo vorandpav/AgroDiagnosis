@@ -13,30 +13,30 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from starlette.responses import Response
 
-from src import config, db, logging_config
+from src import config, db, logging_config, mlflow
 from src.api import health, hello, process
-from src.services import inference as inference_service
 
 log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Manages application lifecycle: pool, model load, and cleanup."""
+    """Manages application lifecycle: pool, optional model load, and cleanup."""
     settings = config.get_settings()
     logging_config.setup_logging(settings.log_level)
 
     app.state.settings = settings
     app.state.db_pool = await db.create_db_pool(settings)
-    app.state.model, app.state.class_names = inference_service.load_model(settings)
-    app.state.model_ref = f"{settings.mlflow_model_name}@{settings.mlflow_model_alias}"
+    runtime = mlflow.setup_mlflow(settings)
+    app.state.model = runtime.model
+    app.state.class_names = runtime.class_names
+    app.state.model_ref = runtime.model_ref
 
     log.info(
-        "Application %s v%s started (debug=%s, model=%s)",
+        "Application %s v%s started (debug=%s)",
         settings.app_name,
         settings.version,
         settings.debug,
-        app.state.model_ref,
     )
     try:
         yield

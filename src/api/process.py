@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Request, UploadFile, status
 
 from src.schemas import ProcessResponse
 from src.services import inference as inference_service
@@ -22,7 +22,16 @@ async def process(request: Request, file: UploadFile) -> ProcessResponse:
 
     Returns:
         ProcessResponse: Predicted class, confidence, and model reference.
+
+    Raises:
+        HTTPException: 503 when the model was not loaded at startup.
     """
+    if request.app.state.model is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Inference model is unavailable",
+        )
+
     image_bytes = await file.read()
     result = inference_service.predict(
         request.app.state.model,

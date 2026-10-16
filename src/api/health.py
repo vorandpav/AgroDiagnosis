@@ -55,7 +55,9 @@ async def health(request: Request, response: Response) -> HealthReport:
         HealthReport: Aggregated health report containing all dependency statuses.
     """
     report = await health_service.build_report(
-        request.app.state.db_pool, request.app.state.settings
+        request.app.state.db_pool,
+        request.app.state.settings,
+        model_loaded=request.app.state.model is not None,
     )
     if report.status is not ReportStatus.ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
