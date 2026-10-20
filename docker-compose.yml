@@ -1,4 +1,67 @@
 services:
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks:
+      - agrodiagnosis-network
+
+  worker:
+    build: .
+    profiles: [pipeline]
+    command: ["uv", "run", "--no-sync", "python", "-m", "src.worker"]
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-agrodiagnosis}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/"
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://host.docker.internal:5000}
+      MLFLOW_MODEL_NAME: ${MLFLOW_MODEL_NAME:-agrodiagnosis-plant-disease}
+      MLFLOW_MODEL_ALIAS: ${MLFLOW_MODEL_ALIAS:-champion}
+      TASK_STORAGE_DIR: /data
+      TASK_QUEUE: ${TASK_QUEUE:-agrodiagnosis.inference.v1}
+      INFERENCE_MIN_SECONDS: ${INFERENCE_MIN_SECONDS:-1.0}
+    volumes:
+      - ./task-data:/data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    stop_grace_period: 60s
+    networks:
+      - agrodiagnosis-network
+
+  source:
+    build: .
+    profiles: [pipeline]
+    command: ["uv", "run", "--no-sync", "python", "-m", "src.source", "${BATCH_MANIFEST:-/data/demo/tasks.jsonl}"]
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/"
+      TASK_QUEUE: ${TASK_QUEUE:-agrodiagnosis.inference.v1}
+      PUBLISH_TIMEOUT_SECONDS: ${PUBLISH_TIMEOUT_SECONDS:-5.0}
+    volumes:
+      - ./task-data:/data:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks:
+      - agrodiagnosis-network
+
   postgres:
     image: postgres:16-alpine
     container_name: agrodiagnosis-postgres
@@ -60,6 +123,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  rabbitmq-data:
   postgres-data:
 
 networks:

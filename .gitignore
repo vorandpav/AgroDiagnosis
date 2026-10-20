@@ -44,3 +44,5 @@ training/multirun/
 
 # MLflow
 deploy/mlflow/mlartifacts/
+task-data/**
+!task-data/README.md
