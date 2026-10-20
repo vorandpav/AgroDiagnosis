@@ -59,3 +59,61 @@ class ProcessResponse(BaseModel):
     label: str = Field(description="Predicted plant/disease class.")
     confidence: float = Field(description="Softmax probability of the predicted class.")
     model: str = Field(description="Loaded Model Registry reference (name@alias).")
+
+
+class EvaluationRequest(BaseModel):
+    """Input schema for an uploaded labelled test dataset."""
+
+    dataset_name: str = Field(min_length=1, max_length=100, pattern=r"^[\w .-]+$")
+    archive: bytes = Field(min_length=1)
+
+
+class EvaluationMetrics(BaseModel):
+    """Metrics over classes present in predictions or ground truth."""
+
+    accuracy: float = Field(ge=0, le=1)
+    precision_macro: float = Field(ge=0, le=1)
+    recall_macro: float = Field(ge=0, le=1)
+    f1_macro: float = Field(ge=0, le=1)
+
+
+class EvaluationPrediction(BaseModel):
+    """Ground truth and prediction for a single image."""
+
+    path: str
+    sha256: str
+    expected: str
+    predicted: str
+    confidence: float = Field(ge=0, le=1)
+
+
+class EvaluationReport(BaseModel):
+    """Evaluation report for MLflow without the original images."""
+
+    dataset_name: str
+    dataset_sha256: str
+    model: str
+    model_version: str
+    metrics: EvaluationMetrics
+    labels: list[str]
+    confusion_matrix: list[list[int]]
+    predictions: list[EvaluationPrediction]
+
+
+class EvaluationResponse(BaseModel):
+    """Response schema containing evaluation metrics and tracking identifiers."""
+
+    dataset_name: str
+    dataset_sha256: str
+    sample_count: int = Field(gt=0)
+    model: str
+    model_version: str
+    metrics: EvaluationMetrics
+    run_id: str
+
+
+class EvaluationError(BaseModel):
+    """Response schema containing a stable error code and a readable message."""
+
+    status: str
+    message: str

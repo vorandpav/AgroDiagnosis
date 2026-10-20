@@ -21,6 +21,7 @@ class MLflowRuntime(NamedTuple):
     model_ref: str
     model: nn.Module | None
     class_names: list[str]
+    model_version: str | None = None
 
 
 def setup_mlflow(settings: Settings) -> MLflowRuntime:
@@ -47,10 +48,12 @@ def setup_mlflow(settings: Settings) -> MLflowRuntime:
 
     log.info("MLflow Tracking Server reachable at %s", tracking_uri)
     try:
-        model, class_names = inference_service.load_model(settings)
+        model, class_names, model_version = inference_service.load_model(settings)
     except RuntimeError as exc:
         log.warning("Inference model not loaded (%s): %s", model_ref, exc)
         return MLflowRuntime(model_ref=model_ref, model=None, class_names=[])
 
     log.info("Inference model loaded: %s (%d classes)", model_ref, len(class_names))
-    return MLflowRuntime(model_ref=model_ref, model=model, class_names=class_names)
+    return MLflowRuntime(
+        model_ref=model_ref, model=model, class_names=class_names, model_version=model_version
+    )

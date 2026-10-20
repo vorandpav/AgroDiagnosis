@@ -33,7 +33,7 @@ async def test_process_returns_prediction(client: AsyncClient) -> None:
 async def client_without_model(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
     """HTTP client for an app that started without an inference model."""
 
-    def _fail_load_model(settings: object) -> tuple[object, list[str]]:
+    def _fail_load_model(settings: object) -> tuple[object, list[str], str]:
         del settings
         raise RuntimeError("Failed to load model from models:/x@champion")
 

@@ -34,9 +34,9 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
         AsyncClient: Configured HTTP client for request simulation.
     """
 
-    def _fake_load_model(settings: object) -> tuple[nn.Module, list[str]]:
+    def _fake_load_model(settings: object) -> tuple[nn.Module, list[str], str]:
         del settings
-        return _FakeModel().eval(), [f"class_{index}" for index in range(38)]
+        return _FakeModel().eval(), [f"class_{index}" for index in range(38)], "1"
 
     monkeypatch.setattr("src.services.inference.load_model", _fake_load_model)
     monkeypatch.setattr("src.services.health.probe_mlflow_tracking", lambda _uri: None)

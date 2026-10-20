@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request
 from starlette.responses import Response
 
 from src import config, db, logging_config, mlflow
-from src.api import health, hello, process
+from src.api import evaluate, health, hello, process
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.model = runtime.model
     app.state.class_names = runtime.class_names
     app.state.model_ref = runtime.model_ref
+    app.state.model_version = runtime.model_version
 
     log.info(
         "Application %s v%s started (debug=%s)",
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(hello.router)
     app.include_router(health.router)
     app.include_router(process.router)
+    app.include_router(evaluate.router)
     return app
 
 

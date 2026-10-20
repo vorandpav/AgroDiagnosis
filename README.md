@@ -51,6 +51,18 @@ Read [`Makefile`](Makefile) for additional commands.
 | GET    | /healthz        | Quick liveness probe for orchestration systems     |
 | GET    | /api/v1/version | Current version                                    |
 | GET    | /api/v1/health  | Comprehensive readiness report across dependencies |
+| POST   | /evaluate       | Evaluate a labelled ZIP dataset and log results to MLflow |
 | POST   | /process        | Plant-disease inference (multipart image `file`)   |
 
 Swagger UI is available at `/docs`.
+
+For `POST /evaluate`, upload a ZIP archive in the multipart `file` field through
+`/docs`. Supported image formats: JPG, JPEG and PNG. Labels are the directory names:
+
+```text
+Apple/Apple_scab/image1.jpg
+Cherry/Powdery_mildew/image2.png
+```
+
+A single enclosing directory such as `test/` is also supported. Class names must
+match `src/class_names.json`.
