@@ -7,8 +7,7 @@ This directory serves as the shared storage (`/data`) for pipeline containers. A
 You can automatically generate a batch of tasks from any existing directory of images:
 
 ```bash
-uv run python -m src.prepare_batch training/data/plant-diseases-processed/val --name demo --limit 100
-
+uv run python task-data/scripts/prepare_batch.py training/data/plant-diseases-processed/val --name demo --limit 100
 ```
 
 **Options:**

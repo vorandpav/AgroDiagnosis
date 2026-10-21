@@ -46,3 +46,5 @@ training/multirun/
 deploy/mlflow/mlartifacts/
 task-data/**
 !task-data/README.md
+!task-data/scripts/
+!task-data/scripts/**

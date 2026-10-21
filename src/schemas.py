@@ -1,10 +1,10 @@
 """Application API Pydantic contracts and response schemas."""
 
 from enum import StrEnum
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, DirectoryPath, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class HelloResponse(BaseModel):
@@ -90,22 +90,6 @@ class TaskResult(BaseModel):
     prediction: ProcessResponse
     model_version: str
     processing_seconds: float = Field(ge=0, allow_inf_nan=False)
-
-
-class BatchPreparation(BaseModel):
-    """Define an image directory to snapshot into a new batch."""
-
-    source_dir: DirectoryPath
-    storage_dir: Path
-    name: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
-    limit: int | None = Field(default=None, gt=0)
-
-
-class PreparedBatch(BaseModel):
-    """Describe a completed batch ready for publication."""
-
-    manifest: Path
-    task_count: int = Field(gt=0)
 
 
 class PublicationReport(BaseModel):
