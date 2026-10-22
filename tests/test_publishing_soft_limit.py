@@ -7,11 +7,11 @@ import pytest
 
 from src.config import Settings
 from src.exceptions import QueueFullError
-from src.schemas import InferenceTask
 from src.messaging.publishing import (
     publish_inference_task,
     publish_inference_task_with_backoff,
 )
+from src.schemas import InferenceTask
 
 
 @pytest.fixture

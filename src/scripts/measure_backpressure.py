@@ -21,12 +21,12 @@ import aio_pika
 import psutil
 from faststream.rabbit import RabbitBroker, RabbitQueue
 
-from src.messaging.broker import create_broker, queue_depth
 from src.config import Settings, get_settings
 from src.exceptions import QueueFullError
 from src.logging_config import setup_logging
-from src.schemas import InferenceTask
+from src.messaging.broker import create_broker, queue_depth
 from src.messaging.publishing import publish_inference_task, publish_inference_task_with_backoff
+from src.schemas import InferenceTask
 
 log = logging.getLogger(__name__)
 

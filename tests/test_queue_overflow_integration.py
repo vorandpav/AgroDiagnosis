@@ -10,11 +10,11 @@ pytest.importorskip("testcontainers")
 
 from testcontainers.community.rabbitmq import RabbitMqContainer
 
-from src.messaging.broker import create_broker, dead_letter_queue, queue_depth, task_queue
 from src.config import Settings
 from src.exceptions import QueueFullError
-from src.schemas import InferenceTask
+from src.messaging.broker import create_broker, dead_letter_queue, queue_depth, task_queue
 from src.messaging.publishing import publish_inference_task
+from src.schemas import InferenceTask
 
 pytestmark = pytest.mark.integration
 

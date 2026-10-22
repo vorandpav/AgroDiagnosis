@@ -47,6 +47,9 @@ explicit = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
+markers = [
+    "integration: requires Docker (Testcontainers RabbitMQ)",
+]
 
 [tool.ruff]
 target-version = "py312"

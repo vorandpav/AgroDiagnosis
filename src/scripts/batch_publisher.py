@@ -21,11 +21,11 @@ from uuid import UUID
 
 from faststream.rabbit import RabbitBroker
 
-from src.messaging.broker import create_broker, dead_letter_queue, task_queue
 from src.config import Settings, get_settings
 from src.logging_config import setup_logging
-from src.schemas import InferenceTask, PublicationReport
+from src.messaging.broker import create_broker, dead_letter_queue, task_queue
 from src.messaging.publishing import publish_inference_task_with_backoff
+from src.schemas import InferenceTask, PublicationReport
 
 log = logging.getLogger(__name__)
 

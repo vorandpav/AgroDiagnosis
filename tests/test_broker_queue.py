@@ -3,8 +3,8 @@
 import pytest
 from pydantic import ValidationError
 
-from src.messaging.broker import task_queue
 from src.config import Settings
+from src.messaging.broker import task_queue
 
 
 def test_task_queue_rejects_publish_when_hard_limit_reached() -> None:
