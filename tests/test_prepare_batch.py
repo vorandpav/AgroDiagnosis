@@ -1,12 +1,12 @@
-"""Verify batch preparation script without external services."""
+"""Verify batch preparation script without app/queue imports."""
 
 import importlib.util
+import json
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from PIL import Image, UnidentifiedImageError
-
-from src.source import read_tasks
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "task-data" / "scripts" / "prepare_batch.py"
 _SPEC = importlib.util.spec_from_file_location("prepare_batch_script", _SCRIPT)
@@ -14,6 +14,10 @@ assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 prepare_batch = _MODULE.prepare_batch
+
+
+def _read_records(manifest: Path) -> list[dict[str, str]]:
+    return [json.loads(line) for line in manifest.read_text(encoding="utf-8").splitlines() if line]
 
 
 @pytest.fixture
@@ -32,13 +36,14 @@ def test_preparation_generates_unique_ids_and_readable_copies_for_large_batch(
         directory.mkdir(exist_ok=True)
         Image.new("RGB", (2, 2)).save(directory / f"{index}.PNG")
     manifest, task_count = prepare_batch(source, storage, "demo")
-    tasks = list(read_tasks(manifest))
+    records = _read_records(manifest)
     assert task_count == 120
-    assert len({task.task_id for task in tasks}) == 120
-    for task in tasks:
-        with Image.open(storage / task.image_path) as image:
+    assert len({record["id"] for record in records}) == 120
+    for record in records:
+        UUID(record["id"])
+        assert set(record) == {"id", "path"}
+        with Image.open(storage / record["path"]) as image:
             assert image.size == (2, 2)
-    assert list(read_tasks(manifest)) == tasks
 
 
 def test_preparation_limits_images_and_preserves_snapshot(dirs: tuple[Path, Path]) -> None:
@@ -47,11 +52,11 @@ def test_preparation_limits_images_and_preserves_snapshot(dirs: tuple[Path, Path
     Image.new("RGB", (2, 2)).save(original)
     Image.new("RGB", (2, 2)).save(source / "b.jpg")
     manifest, task_count = prepare_batch(source, storage, "demo", limit=1)
-    task = next(read_tasks(manifest))
+    record = _read_records(manifest)[0]
     original_bytes = original.read_bytes()
     original.write_bytes(b"changed after preparation")
     assert task_count == 1
-    assert (storage / task.image_path).read_bytes() == original_bytes
+    assert (storage / record["path"]).read_bytes() == original_bytes
 
 
 def test_preparation_does_not_overwrite_existing_batch(dirs: tuple[Path, Path]) -> None:
@@ -67,9 +72,9 @@ def test_preparation_does_not_overwrite_existing_batch(dirs: tuple[Path, Path]) 
 def test_new_batch_assigns_new_ids_to_same_images(dirs: tuple[Path, Path]) -> None:
     source, storage = dirs
     Image.new("RGB", (2, 2)).save(source / "leaf.jpg")
-    first = next(read_tasks(prepare_batch(source, storage, "demo")[0]))
-    second = next(read_tasks(prepare_batch(source, storage, "second")[0]))
-    assert first.task_id != second.task_id
+    first = _read_records(prepare_batch(source, storage, "demo")[0])[0]
+    second = _read_records(prepare_batch(source, storage, "second")[0])[0]
+    assert first["id"] != second["id"]
 
 
 def test_preparation_does_not_publish_manifest_when_image_is_corrupt(

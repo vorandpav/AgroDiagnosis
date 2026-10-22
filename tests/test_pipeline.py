@@ -1,6 +1,7 @@
 """Test the initial pipeline without external services."""
 
 import asyncio
+import json
 import threading
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -13,10 +14,19 @@ from pydantic import ValidationError
 from src.broker import create_broker, task_queue
 from src.config import Settings
 from src.schemas import InferenceTask, ProcessResponse, TaskResult
+from src.scripts.batch_publisher import (
+    publish_manifest,
+    read_tasks,
+    to_inference_task,
+)
 from src.services.inference import load_model
 from src.services.task_processing import process_task, save_result
-from src.source import publish_manifest, read_tasks
 from src.worker import register_handler, run_worker
+
+
+def _manifest_line(task: InferenceTask) -> str:
+    """Serialize a task the way prepare_batch writes fixture records."""
+    return json.dumps({"id": str(task.task_id), "path": task.image_path})
 
 
 @pytest.fixture
@@ -52,6 +62,11 @@ def test_task_round_trips_through_json(task: InferenceTask) -> None:
     assert InferenceTask.model_validate_json(task.model_dump_json()) == task
 
 
+def test_batch_publisher_adapts_prepare_batch_record(task: InferenceTask) -> None:
+    adapted = to_inference_task({"id": str(task.task_id), "path": task.image_path})
+    assert adapted == task
+
+
 @pytest.mark.parametrize("value", [-1, float("inf"), float("nan")])
 def test_settings_reject_invalid_inference_duration(value: float) -> None:
     with pytest.raises(ValidationError):
@@ -62,10 +77,10 @@ def test_manifest_yields_first_task_before_reading_invalid_next_line(
     tmp_path: Path, task: InferenceTask
 ) -> None:
     manifest = tmp_path / "tasks.jsonl"
-    manifest.write_text(task.model_dump_json() + "\nnot json", encoding="utf-8")
+    manifest.write_text(_manifest_line(task) + "\nnot json", encoding="utf-8")
     tasks = read_tasks(manifest)
     assert next(tasks) == task
-    with pytest.raises(ValidationError):
+    with pytest.raises(json.JSONDecodeError):
         next(tasks)
 
 
@@ -76,11 +91,11 @@ def test_manifest_rejects_oversized_line(tmp_path: Path) -> None:
         next(read_tasks(manifest))
 
 
-async def test_source_delivers_manifest_to_worker_and_saves_result(
+async def test_batch_publisher_delivers_manifest_to_worker_and_saves_result(
     tmp_path: Path, settings: Settings, task: InferenceTask, result: TaskResult
 ) -> None:
     manifest = tmp_path / "tasks.jsonl"
-    manifest.write_text(task.model_dump_json() + "\n", encoding="utf-8")
+    manifest.write_text(_manifest_line(task) + "\n", encoding="utf-8")
     execute = AsyncMock(return_value=result)
     save = AsyncMock()
     broker = create_broker(settings)
@@ -128,11 +143,11 @@ async def test_handler_does_not_save_when_inference_fails(
     save.assert_not_awaited()
 
 
-async def test_source_stops_at_failed_publication_without_reading_next_task(
+async def test_batch_publisher_stops_at_failed_publication_without_reading_next_task(
     tmp_path: Path, settings: Settings, task: InferenceTask
 ) -> None:
     manifest = tmp_path / "tasks.jsonl"
-    manifest.write_text(task.model_dump_json() + "\ninvalid", encoding="utf-8")
+    manifest.write_text(_manifest_line(task) + "\ninvalid", encoding="utf-8")
     broker = Mock()
     broker.publish = AsyncMock(side_effect=TimeoutError("confirm timeout"))
     with pytest.raises(TimeoutError, match="confirm timeout"):

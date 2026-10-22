@@ -1,4 +1,4 @@
-"""Build a JSONL batch from an image directory for the pipeline publisher.
+"""Build a JSONL image batch under task-data/ (no app/queue imports).
 
 Usage:
     uv run python task-data/scripts/prepare_batch.py IMAGE_DIRECTORY --name demo --limit 100
@@ -7,6 +7,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 from collections.abc import Iterator
@@ -15,8 +16,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from PIL import Image
-
-from src.schemas import InferenceTask
 
 _BATCH_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
@@ -66,11 +65,11 @@ def prepare_batch(
             shutil.copyfile(original, copied)
             with Image.open(copied) as image:
                 image.verify()
-            task = InferenceTask(
-                task_id=task_id,
-                image_path=copied.relative_to(storage).as_posix(),
-            )
-            manifest.write(task.model_dump_json() + "\n")
+            record = {
+                "id": str(task_id),
+                "path": copied.relative_to(storage).as_posix(),
+            }
+            manifest.write(json.dumps(record, ensure_ascii=False) + "\n")
             task_count += 1
     if task_count == 0:
         raise ValueError("Source directory contains no supported images")

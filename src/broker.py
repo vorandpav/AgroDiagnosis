@@ -14,7 +14,7 @@ def create_broker(settings: Settings) -> RabbitBroker:
 
 
 def task_queue(settings: Settings) -> RabbitQueue:
-    """Define the same durable queue for the source and worker."""
+    """Define the same durable queue for publishers and the inference worker."""
     return RabbitQueue(
         settings.task_queue,
         durable=True,
