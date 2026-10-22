@@ -36,9 +36,9 @@ async def test_publish_manifest_retries_after_soft_limit_then_succeeds(
     async def fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr("src.services.publishing.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("src.messaging.publishing.asyncio.sleep", fake_sleep)
     monkeypatch.setattr(
-        "src.services.publishing.task_queue_depth",
+        "src.messaging.publishing.queue_depth",
         AsyncMock(side_effect=[2, 0]),
     )
     broker = Mock()
@@ -63,8 +63,8 @@ async def test_publish_manifest_retries_after_hard_reject_then_succeeds(
     async def fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr("src.services.publishing.asyncio.sleep", fake_sleep)
-    monkeypatch.setattr("src.services.publishing.task_queue_depth", AsyncMock(return_value=0))
+    monkeypatch.setattr("src.messaging.publishing.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("src.messaging.publishing.queue_depth", AsyncMock(return_value=0))
     broker = Mock()
     broker.publish = AsyncMock(side_effect=[DeliveryError(Mock(), None), None])
     report = await publish_manifest(manifest, broker, settings)

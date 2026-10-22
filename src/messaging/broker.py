@@ -8,10 +8,14 @@ from src.config import Settings
 
 
 def create_broker(settings: Settings) -> RabbitBroker:
-    """Create a broker with publisher confirms and one in-flight message."""
+    """Create a broker with publisher confirms and prefetch matching the executor."""
     return RabbitBroker(
         settings.rabbitmq_url,
-        default_channel=Channel(prefetch_count=1, publisher_confirms=True, on_return_raises=True),
+        default_channel=Channel(
+            prefetch_count=settings.worker_executor_workers,
+            publisher_confirms=True,
+            on_return_raises=True,
+        ),
     )
 
 
@@ -39,12 +43,9 @@ def retry_after_seconds(settings: Settings) -> int:
     return max(1, ceil(settings.inference_min_seconds))
 
 
-async def task_queue_depth(broker: RabbitBroker, settings: Settings) -> int:
-    """Return ready-message count via passive declare."""
+async def queue_depth(broker: RabbitBroker, queue_name: str) -> int:
+    """Return ready-message count via a fresh underlay passive declare."""
     channel = await broker.config.channel_manager.get_channel()
-    declared = await channel.declare_queue(
-        name=settings.task_queue,
-        durable=True,
-        passive=True,
-    )
-    return int(declared.declaration_result.message_count)
+    underlay = await channel.get_underlay_channel()
+    declared = await underlay.queue_declare(queue_name, durable=True, passive=True)
+    return int(declared.message_count)

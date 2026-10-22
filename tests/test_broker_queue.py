@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.broker import task_queue
+from src.messaging.broker import task_queue
 from src.config import Settings
 
 

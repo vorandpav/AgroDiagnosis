@@ -34,7 +34,7 @@ async def tasks_client(
     broker.declare_queue = AsyncMock()
     broker.publish = AsyncMock()
     monkeypatch.setattr("src.app.create_broker", lambda _settings: broker)
-    monkeypatch.setattr("src.services.publishing.task_queue_depth", AsyncMock(return_value=0))
+    monkeypatch.setattr("src.messaging.publishing.queue_depth", AsyncMock(return_value=0))
 
     pool = Mock()
     pool.execute = AsyncMock()
@@ -80,11 +80,21 @@ async def test_post_tasks_returns_202_and_persists_upload(
     app.state.broker.publish.assert_awaited_once()
 
 
+async def test_post_tasks_rejects_unsupported_suffix(tasks_client: AsyncClient) -> None:
+    response = await tasks_client.post(
+        "/api/v1/tasks",
+        files={"file": ("leaf.gif", _png_bytes(), "image/gif")},
+    )
+    assert response.status_code == 400
+    assert "jpg" in response.json()["detail"].lower()
+    app.state.broker.publish.assert_not_awaited()
+
+
 async def test_post_tasks_succeeds_when_soft_limit_reached_but_hard_has_headroom(
     tasks_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Interactive users may use the reserved band above the batch soft watermark."""
-    monkeypatch.setattr("src.services.publishing.task_queue_depth", AsyncMock(return_value=2))
+    monkeypatch.setattr("src.messaging.publishing.queue_depth", AsyncMock(return_value=2))
     response = await tasks_client.post(
         "/api/v1/tasks",
         files={"file": ("leaf.png", _png_bytes(), "image/png")},

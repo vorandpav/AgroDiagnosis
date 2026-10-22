@@ -20,7 +20,6 @@ services:
 
   inference-worker:
     build: .
-    profiles: [pipeline]
     command: ["uv", "run", "--no-sync", "python", "-m", "src.inference_worker"]
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-agrodiagnosis}"
@@ -33,6 +32,11 @@ services:
       TASK_QUEUE_MAX_LENGTH: ${TASK_QUEUE_MAX_LENGTH:-100}
       TASK_QUEUE_SOFT_LIMIT: ${TASK_QUEUE_SOFT_LIMIT:-60}
       INFERENCE_MIN_SECONDS: ${INFERENCE_MIN_SECONDS:-1.0}
+      TASK_MAX_DELIVERY_ATTEMPTS: ${TASK_MAX_DELIVERY_ATTEMPTS:-3}
+      WORKER_HEALTH_PORT: ${WORKER_HEALTH_PORT:-8001}
+      WORKER_EXECUTOR_WORKERS: ${WORKER_EXECUTOR_WORKERS:-1}
+    ports:
+      - "127.0.0.1:${WORKER_HEALTH_PORT:-8001}:8001"
     volumes:
       - ./task-data:/data:ro
     depends_on:
@@ -41,7 +45,15 @@ services:
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      disable: true
+      test:
+        [
+          "CMD-SHELL",
+          "uv run python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=3)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     stop_grace_period: 60s
     networks:
       - agrodiagnosis-network

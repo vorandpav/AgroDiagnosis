@@ -72,6 +72,29 @@ class Settings(BaseSettings):
         allow_inf_nan=False,
         description="Backoff for batch_publisher when the soft/hard limit blocks publish.",
     )
+    task_max_delivery_attempts: int = Field(
+        default=3,
+        ge=1,
+        description="Failed handler deliveries before reject-to-DLQ (no infinite requeue).",
+    )
+    task_retry_delay_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Delay before republishing a failed task for another attempt.",
+    )
+    worker_health_host: str = "0.0.0.0"
+    worker_health_port: int = Field(
+        default=8001,
+        gt=0,
+        lt=65536,
+        description="HTTP port for inference-worker /healthz during processing.",
+    )
+    worker_executor_workers: int = Field(
+        default=1,
+        ge=1,
+        description="Thread pool size; must match broker prefetch_count.",
+    )
 
     @model_validator(mode="after")
     def soft_limit_within_hard_limit(self) -> Self:

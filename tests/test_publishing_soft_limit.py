@@ -8,7 +8,7 @@ import pytest
 from src.config import Settings
 from src.exceptions import QueueFullError
 from src.schemas import InferenceTask
-from src.services.publishing import (
+from src.messaging.publishing import (
     publish_inference_task,
     publish_inference_task_with_backoff,
 )
@@ -26,7 +26,7 @@ def settings() -> Settings:
 async def test_user_publish_ignores_soft_limit(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("src.services.publishing.task_queue_depth", AsyncMock(return_value=3))
+    monkeypatch.setattr("src.messaging.publishing.queue_depth", AsyncMock(return_value=3))
     broker = Mock()
     broker.publish = AsyncMock()
     task = InferenceTask(task_id=uuid4(), image_path="uploads/x.jpg")
@@ -42,9 +42,9 @@ async def test_batch_publish_waits_at_soft_limit_then_succeeds(
     async def fake_sleep(delay: float) -> None:
         sleeps.append(delay)
 
-    monkeypatch.setattr("src.services.publishing.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("src.messaging.publishing.asyncio.sleep", fake_sleep)
     monkeypatch.setattr(
-        "src.services.publishing.task_queue_depth",
+        "src.messaging.publishing.queue_depth",
         AsyncMock(side_effect=[3, 0]),
     )
     broker = Mock()
@@ -58,9 +58,9 @@ async def test_batch_publish_waits_at_soft_limit_then_succeeds(
 async def test_batch_publish_raises_soft_limit_before_publish(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("src.services.publishing.task_queue_depth", AsyncMock(return_value=3))
+    monkeypatch.setattr("src.messaging.publishing.queue_depth", AsyncMock(return_value=3))
     monkeypatch.setattr(
-        "src.services.publishing.asyncio.sleep", AsyncMock(side_effect=QueueFullError("stop"))
+        "src.messaging.publishing.asyncio.sleep", AsyncMock(side_effect=QueueFullError("stop"))
     )
     broker = Mock()
     broker.publish = AsyncMock()

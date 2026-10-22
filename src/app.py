@@ -15,8 +15,8 @@ from starlette.responses import Response
 
 from src import config, db, logging_config, mlflow
 from src.api import evaluate, health, hello, tasks
-from src.broker import create_broker, dead_letter_queue, task_queue
-from src.services.tasks import initialize_results
+from src.messaging.broker import create_broker, dead_letter_queue, task_queue
+from src.tasks.results import initialize_results
 
 log = logging.getLogger(__name__)
 

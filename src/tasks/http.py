@@ -11,8 +11,8 @@ from faststream.rabbit import RabbitBroker
 
 from src.config import Settings
 from src.exceptions import QueueFullError
+from src.messaging.publishing import publish_inference_task
 from src.schemas import InferenceTask, TaskAccepted, TaskResult
-from src.services.publishing import publish_inference_task
 
 log = logging.getLogger(__name__)
 
@@ -20,9 +20,10 @@ _ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png"}
 
 
 def _upload_suffix(filename: str | None) -> str:
-    suffix = Path(filename or "upload.jpg").suffix.lower()
+    """Return an allowed image suffix or raise ValueError."""
+    suffix = Path(filename or "").suffix.lower()
     if suffix not in _ALLOWED_SUFFIXES:
-        return ".jpg"
+        raise ValueError("Uploaded file must be .jpg, .jpeg, or .png")
     return suffix
 
 
@@ -35,8 +36,9 @@ async def submit_uploaded_task(
     """Store the image, publish metadata, and roll back the file on queue full."""
     if not image_bytes:
         raise ValueError("Uploaded file is empty")
+    suffix = _upload_suffix(filename)
     task_id = uuid4()
-    relative = Path("uploads") / f"{task_id}{_upload_suffix(filename)}"
+    relative = Path("uploads") / f"{task_id}{suffix}"
     absolute = (settings.task_storage_dir / relative).resolve()
     root = settings.task_storage_dir.resolve()
     if not absolute.is_relative_to(root):

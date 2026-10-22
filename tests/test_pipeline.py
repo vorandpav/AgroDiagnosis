@@ -11,9 +11,14 @@ import pytest
 from faststream.rabbit import TestRabbitBroker
 from pydantic import ValidationError
 
-from src.broker import create_broker, task_queue
 from src.config import Settings
-from src.inference_worker import register_handler, run_inference_worker
+from src.inference_worker.consumer import (
+    recover_failed_delivery,
+    register_handler,
+    run_inference_worker,
+)
+from src.inference_worker.processing import process_task
+from src.messaging.broker import create_broker, task_queue
 from src.schemas import InferenceResult, InferenceTask, TaskResult
 from src.scripts.batch_publisher import (
     publish_manifest,
@@ -21,7 +26,7 @@ from src.scripts.batch_publisher import (
     to_inference_task,
 )
 from src.services.inference import load_model
-from src.services.tasks import process_task, save_result
+from src.tasks.results import save_result
 
 
 def _manifest_line(task: InferenceTask) -> str:
@@ -32,7 +37,19 @@ def _manifest_line(task: InferenceTask) -> str:
 @pytest.fixture(autouse=True)
 def _queue_below_soft_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Avoid passive declare against TestRabbitBroker during unit tests."""
-    monkeypatch.setattr("src.services.publishing.task_queue_depth", AsyncMock(return_value=0))
+    monkeypatch.setattr("src.messaging.publishing.queue_depth", AsyncMock(return_value=0))
+
+
+@pytest.fixture(autouse=True)
+def _fake_worker_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Do not bind a real health port while unit-testing the worker."""
+    server = Mock()
+    server.serve = AsyncMock()
+    server.should_exit = False
+    monkeypatch.setattr(
+        "src.inference_worker.consumer.create_health_server",
+        lambda *_args, **_kwargs: server,
+    )
 
 
 @pytest.fixture
@@ -40,6 +57,7 @@ def settings() -> Settings:
     return Settings(
         rabbitmq_url="amqp://guest:guest@127.0.0.1:59998/",
         inference_min_seconds=0,
+        task_retry_delay_seconds=0.01,
     )
 
 
@@ -139,13 +157,13 @@ async def test_handler_waits_for_inference_before_saving(
 async def test_handler_does_not_save_when_inference_fails(
     settings: Settings, task: InferenceTask
 ) -> None:
+    settings.task_max_delivery_attempts = 1
     execute = AsyncMock(side_effect=ValueError("invalid image"))
     save = AsyncMock()
     broker = create_broker(settings)
     register_handler(broker, settings, execute, save)
     async with TestRabbitBroker(broker):
-        with pytest.raises(ValueError, match="invalid image"):
-            await broker.publish(task, queue=task_queue(settings))
+        await broker.publish(task, queue=task_queue(settings))
     save.assert_not_awaited()
 
 
@@ -182,10 +200,10 @@ def test_processing_uses_model_and_adds_only_remaining_delay(
     model = Mock()
     predict = Mock(return_value=result.prediction)
     sleep = Mock()
-    monkeypatch.setattr("src.services.tasks.predict", predict)
-    monkeypatch.setattr("src.services.tasks.time.sleep", sleep)
+    monkeypatch.setattr("src.inference_worker.processing.predict", predict)
+    monkeypatch.setattr("src.inference_worker.processing.time.sleep", sleep)
     monkeypatch.setattr(
-        "src.services.tasks.time.perf_counter",
+        "src.inference_worker.processing.time.perf_counter",
         Mock(side_effect=[0, inference_seconds, total_seconds]),
     )
     actual = process_task(task, settings, model, ["healthy"], "7")
@@ -215,9 +233,11 @@ async def test_worker_loads_model_once_before_consuming_and_closes_pool(
     pool = Mock()
     pool.execute = AsyncMock()
     close = AsyncMock()
-    monkeypatch.setattr("src.inference_worker.load_model", load)
-    monkeypatch.setattr("src.inference_worker.create_db_pool", AsyncMock(return_value=pool))
-    monkeypatch.setattr("src.inference_worker.close_db_pool", close)
+    monkeypatch.setattr("src.inference_worker.consumer.load_model", load)
+    monkeypatch.setattr(
+        "src.inference_worker.consumer.create_db_pool", AsyncMock(return_value=pool)
+    )
+    monkeypatch.setattr("src.inference_worker.consumer.close_db_pool", close)
     main_thread = threading.get_ident()
 
     def predict_task(
@@ -233,7 +253,7 @@ async def test_worker_loads_model_once_before_consuming_and_closes_pool(
         assert version == "7"
         return result
 
-    monkeypatch.setattr("src.inference_worker.process_task", predict_task)
+    monkeypatch.setattr("src.inference_worker.consumer.process_task", predict_task)
 
     async def run(app: object) -> None:
         load.assert_called_once_with(settings)
@@ -242,7 +262,7 @@ async def test_worker_loads_model_once_before_consuming_and_closes_pool(
             await app.broker.publish(task, queue=task_queue(settings))
             await app.broker.publish(task, queue=task_queue(settings))
 
-    monkeypatch.setattr("src.inference_worker.FastStream.run", run)
+    monkeypatch.setattr("src.inference_worker.consumer.FastStream.run", run)
     await run_inference_worker(settings)
     load.assert_called_once_with(settings)
     assert pool.execute.await_count == 3
@@ -269,12 +289,13 @@ async def test_handler_acknowledges_only_after_result_is_saved(
     ack.assert_awaited_once()
 
 
-async def test_handler_rejects_without_ack_when_database_write_fails(
+async def test_handler_rejects_to_dlq_when_attempts_exhausted(
     settings: Settings,
     task: InferenceTask,
     result: TaskResult,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    settings.task_max_delivery_attempts = 1
     ack = AsyncMock()
     reject = AsyncMock()
     monkeypatch.setattr("faststream.rabbit.message.RabbitMessage.ack", ack)
@@ -287,20 +308,51 @@ async def test_handler_rejects_without_ack_when_database_write_fails(
         AsyncMock(side_effect=ConnectionError("database unavailable")),
     )
     async with TestRabbitBroker(broker):
-        with pytest.raises(ConnectionError, match="database unavailable"):
-            await broker.publish(task, queue=task_queue(settings))
+        await broker.publish(task, queue=task_queue(settings))
     ack.assert_not_awaited()
-    reject.assert_awaited_once()
+    reject.assert_awaited_once_with(requeue=False)
+
+
+async def test_recover_failed_delivery_republishes_with_incremented_attempt(
+    settings: Settings, task: InferenceTask
+) -> None:
+    settings.task_max_delivery_attempts = 3
+    broker = Mock()
+    broker.publish = AsyncMock()
+    message = Mock()
+    message.ack = AsyncMock()
+    message.reject = AsyncMock()
+    await recover_failed_delivery(broker, settings, task, message, attempt=0)
+    message.reject.assert_not_awaited()
+    message.ack.assert_awaited_once()
+    broker.publish.assert_awaited_once()
+    assert broker.publish.await_args.kwargs["headers"]["x-delivery-attempt"] == 1
+
+
+async def test_recover_failed_delivery_rejects_to_dlq_when_exhausted(
+    settings: Settings, task: InferenceTask
+) -> None:
+    settings.task_max_delivery_attempts = 3
+    broker = Mock()
+    broker.publish = AsyncMock()
+    message = Mock()
+    message.ack = AsyncMock()
+    message.reject = AsyncMock()
+    await recover_failed_delivery(broker, settings, task, message, attempt=2)
+    broker.publish.assert_not_awaited()
+    message.ack.assert_not_awaited()
+    message.reject.assert_awaited_once_with(requeue=False)
 
 
 async def test_worker_does_not_start_when_model_load_fails(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "src.inference_worker.load_model", Mock(side_effect=RuntimeError("model unavailable"))
+        "src.inference_worker.consumer.load_model",
+        Mock(side_effect=RuntimeError("model unavailable")),
     )
     run = AsyncMock()
-    monkeypatch.setattr("src.inference_worker.FastStream.run", run)
+    monkeypatch.setattr("src.inference_worker.consumer.FastStream.run", run)
     with pytest.raises(RuntimeError, match="model unavailable"):
         await run_inference_worker(settings)
     run.assert_not_awaited()

@@ -8,9 +8,9 @@ import logging
 from aio_pika.exceptions import DeliveryError
 from faststream.rabbit import RabbitBroker
 
-from src.broker import task_queue, task_queue_depth
 from src.config import Settings
 from src.exceptions import QueueFullError
+from src.messaging.broker import queue_depth, task_queue
 from src.schemas import InferenceTask
 
 log = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 async def ensure_below_soft_limit(broker: RabbitBroker, settings: Settings) -> None:
     """Block batch publishers when depth reaches the soft watermark."""
-    depth = await task_queue_depth(broker, settings)
+    depth = await queue_depth(broker, settings.task_queue)
     if depth >= settings.task_queue_soft_limit:
         raise QueueFullError(
             f"Task queue soft limit reached ({depth}>={settings.task_queue_soft_limit})"
