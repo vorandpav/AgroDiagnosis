@@ -63,6 +63,12 @@ class InferenceResult(BaseModel):
     model: str = Field(description="Loaded Model Registry reference (name@alias).")
 
 
+class TaskAccepted(BaseModel):
+    """Acknowledge that a task was accepted into the inference queue."""
+
+    task_id: UUID
+
+
 class InferenceTask(BaseModel):
     """Define an inference command for an image in shared storage."""
 

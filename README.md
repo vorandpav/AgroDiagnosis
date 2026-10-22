@@ -51,8 +51,9 @@ Read [`Makefile`](Makefile) for additional commands.
 | GET    | /healthz        | Quick liveness probe for orchestration systems     |
 | GET    | /api/v1/version | Current version                                    |
 | GET    | /api/v1/health  | Comprehensive readiness report across dependencies |
-| POST   | /evaluate       | Evaluate a labelled ZIP dataset and log results to MLflow |
-| POST   | /process        | Plant-disease inference (multipart image `file`)   |
+| POST   | /evaluate         | Evaluate a labelled ZIP dataset and log results to MLflow |
+| POST   | /api/v1/tasks     | Accept an image into the inference queue (202 / 503) |
+| GET    | /api/v1/tasks/{id}| Fetch a finished task result (404 while processing) |
 
 Swagger UI is available at `/docs`.
 

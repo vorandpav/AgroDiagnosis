@@ -25,6 +25,7 @@ from src.broker import create_broker, dead_letter_queue, task_queue
 from src.config import Settings, get_settings
 from src.logging_config import setup_logging
 from src.schemas import InferenceTask, PublicationReport
+from src.services.publishing import publish_inference_task_with_backoff
 
 log = logging.getLogger(__name__)
 
@@ -69,20 +70,13 @@ def read_tasks(manifest: Path) -> Iterator[InferenceTask]:
 
 
 async def publish_manifest(
-        manifest: Path, broker: RabbitBroker, settings: Settings
+    manifest: Path, broker: RabbitBroker, settings: Settings
 ) -> PublicationReport:
-    """Publish adapted tasks sequentially, awaiting confirmation for each task."""
+    """Publish adapted tasks with backpressure when the bounded queue is full."""
     started = time.perf_counter()
     task_count = 0
     for task in read_tasks(manifest):
-        await broker.publish(
-            task,
-            queue=task_queue(settings),
-            message_id=str(task.task_id),
-            persist=True,
-            mandatory=True,
-            timeout=settings.publish_timeout_seconds,
-        )
+        await publish_inference_task_with_backoff(broker, task, settings)
         log.info("Published task %s", task.task_id)
         task_count += 1
     return PublicationReport(task_count=task_count, elapsed_seconds=time.perf_counter() - started)

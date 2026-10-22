@@ -14,19 +14,29 @@ from fastapi import FastAPI, Request
 from starlette.responses import Response
 
 from src import config, db, logging_config, mlflow
-from src.api import evaluate, health, hello, process
+from src.api import evaluate, health, hello, tasks
+from src.broker import create_broker, dead_letter_queue, task_queue
+from src.services.tasks import initialize_results
 
 log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Manages application lifecycle: pool, optional model load, and cleanup."""
+    """Manage pool, broker, optional model load, and cleanup."""
     settings = config.get_settings()
     logging_config.setup_logging(settings.log_level)
 
     app.state.settings = settings
     app.state.db_pool = await db.create_db_pool(settings)
+    await initialize_results(app.state.db_pool)
+
+    broker = create_broker(settings)
+    await broker.connect()
+    await broker.declare_queue(dead_letter_queue(settings))
+    await broker.declare_queue(task_queue(settings))
+    app.state.broker = broker
+
     runtime = mlflow.setup_mlflow(settings)
     app.state.model = runtime.model
     app.state.class_names = runtime.class_names
@@ -42,6 +52,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await broker.close()
         await db.close_db_pool(app.state.db_pool)
         log.info("Application shut down successfully.")
 
@@ -87,7 +98,7 @@ def create_app() -> FastAPI:
 
     app.include_router(hello.router)
     app.include_router(health.router)
-    app.include_router(process.router)
+    app.include_router(tasks.router)
     app.include_router(evaluate.router)
     return app
 

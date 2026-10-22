@@ -29,6 +29,12 @@ def _manifest_line(task: InferenceTask) -> str:
     return json.dumps({"id": str(task.task_id), "path": task.image_path})
 
 
+@pytest.fixture(autouse=True)
+def _queue_below_soft_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Avoid passive declare against TestRabbitBroker during unit tests."""
+    monkeypatch.setattr("src.services.publishing.task_queue_depth", AsyncMock(return_value=0))
+
+
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
