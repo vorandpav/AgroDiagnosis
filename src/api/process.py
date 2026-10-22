@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, status
 
-from src.schemas import ProcessResponse
+from src.schemas import InferenceResult
 from src.services import inference as inference_service
 
 log = logging.getLogger(__name__)
@@ -12,8 +12,8 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/process", response_model=ProcessResponse)
-async def process(request: Request, file: UploadFile) -> ProcessResponse:
+@router.post("/process", response_model=InferenceResult)
+async def process(request: Request, file: UploadFile) -> InferenceResult:
     """Run inference with the model loaded at application startup.
 
     Args:
@@ -21,7 +21,7 @@ async def process(request: Request, file: UploadFile) -> ProcessResponse:
         file: Uploaded plant leaf image.
 
     Returns:
-        ProcessResponse: Predicted class, confidence, and model reference.
+        InferenceResult: Predicted class, confidence, and model reference.
 
     Raises:
         HTTPException: 503 when the model was not loaded at startup.

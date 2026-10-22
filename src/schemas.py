@@ -4,7 +4,7 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class HelloResponse(BaseModel):
@@ -55,8 +55,8 @@ class HealthReport(BaseModel):
     dependencies: dict[str, DependencyHealth]
 
 
-class ProcessResponse(BaseModel):
-    """Response schema for plant-disease inference."""
+class InferenceResult(BaseModel):
+    """Result of a single model forward pass."""
 
     label: str = Field(description="Predicted plant/disease class.")
     confidence: float = Field(description="Softmax probability of the predicted class.")
@@ -65,8 +65,6 @@ class ProcessResponse(BaseModel):
 
 class InferenceTask(BaseModel):
     """Define an inference command for an image in shared storage."""
-
-    model_config = ConfigDict(extra="forbid")
 
     task_id: UUID
     image_path: str = Field(min_length=1, max_length=1024)
@@ -87,7 +85,7 @@ class TaskResult(BaseModel):
     """Define the persisted result of task processing."""
 
     task_id: UUID
-    prediction: ProcessResponse
+    prediction: InferenceResult
     model_version: str
     processing_seconds: float = Field(ge=0, allow_inf_nan=False)
 

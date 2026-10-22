@@ -1,4 +1,4 @@
-"""Run inference and persist background task results."""
+"""Orchestrate a single inference task and persist its result."""
 
 import time
 

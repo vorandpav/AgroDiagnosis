@@ -1,4 +1,4 @@
-"""Run a standalone FastStream worker: uv run python -m src.worker."""
+"""Run a standalone FastStream inference worker: uv run python -m src.inference_worker."""
 
 import asyncio
 import logging
@@ -17,7 +17,7 @@ from src.db import close_db_pool, create_db_pool
 from src.logging_config import setup_logging
 from src.schemas import InferenceTask, TaskResult
 from src.services.inference import load_model
-from src.services.task_processing import initialize_results, process_task, save_result
+from src.services.tasks import initialize_results, process_task, save_result
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def register_handler(
         log.info("Task %s saved (%.3fs)", task.task_id, result.processing_seconds)
 
 
-async def run_worker(settings: Settings) -> None:
+async def run_inference_worker(settings: Settings) -> None:
     """Load the model once and release resources after the broker stops."""
     async with AsyncExitStack() as resources:
         executor = resources.enter_context(ThreadPoolExecutor(max_workers=1))
@@ -77,10 +77,10 @@ async def run_worker(settings: Settings) -> None:
 
 
 def main() -> None:
-    """Run the worker with settings loaded from the environment."""
+    """Run the inference worker with settings loaded from the environment."""
     settings = get_settings()
     setup_logging(settings.log_level)
-    asyncio.run(run_worker(settings))
+    asyncio.run(run_inference_worker(settings))
 
 
 if __name__ == "__main__":

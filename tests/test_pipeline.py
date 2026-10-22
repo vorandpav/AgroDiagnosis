@@ -13,15 +13,15 @@ from pydantic import ValidationError
 
 from src.broker import create_broker, task_queue
 from src.config import Settings
-from src.schemas import InferenceTask, ProcessResponse, TaskResult
+from src.inference_worker import register_handler, run_inference_worker
+from src.schemas import InferenceResult, InferenceTask, TaskResult
 from src.scripts.batch_publisher import (
     publish_manifest,
     read_tasks,
     to_inference_task,
 )
 from src.services.inference import load_model
-from src.services.task_processing import process_task, save_result
-from src.worker import register_handler, run_worker
+from src.services.tasks import process_task, save_result
 
 
 def _manifest_line(task: InferenceTask) -> str:
@@ -46,7 +46,7 @@ def task() -> InferenceTask:
 def result(task: InferenceTask) -> TaskResult:
     return TaskResult(
         task_id=task.task_id,
-        prediction=ProcessResponse(label="healthy", confidence=0.9, model="plant@champion"),
+        prediction=InferenceResult(label="healthy", confidence=0.9, model="plant@champion"),
         model_version="7",
         processing_seconds=0.1,
     )
@@ -176,10 +176,10 @@ def test_processing_uses_model_and_adds_only_remaining_delay(
     model = Mock()
     predict = Mock(return_value=result.prediction)
     sleep = Mock()
-    monkeypatch.setattr("src.services.task_processing.predict", predict)
-    monkeypatch.setattr("src.services.task_processing.time.sleep", sleep)
+    monkeypatch.setattr("src.services.tasks.predict", predict)
+    monkeypatch.setattr("src.services.tasks.time.sleep", sleep)
     monkeypatch.setattr(
-        "src.services.task_processing.time.perf_counter",
+        "src.services.tasks.time.perf_counter",
         Mock(side_effect=[0, inference_seconds, total_seconds]),
     )
     actual = process_task(task, settings, model, ["healthy"], "7")
@@ -209,9 +209,9 @@ async def test_worker_loads_model_once_before_consuming_and_closes_pool(
     pool = Mock()
     pool.execute = AsyncMock()
     close = AsyncMock()
-    monkeypatch.setattr("src.worker.load_model", load)
-    monkeypatch.setattr("src.worker.create_db_pool", AsyncMock(return_value=pool))
-    monkeypatch.setattr("src.worker.close_db_pool", close)
+    monkeypatch.setattr("src.inference_worker.load_model", load)
+    monkeypatch.setattr("src.inference_worker.create_db_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr("src.inference_worker.close_db_pool", close)
     main_thread = threading.get_ident()
 
     def predict_task(
@@ -227,7 +227,7 @@ async def test_worker_loads_model_once_before_consuming_and_closes_pool(
         assert version == "7"
         return result
 
-    monkeypatch.setattr("src.worker.process_task", predict_task)
+    monkeypatch.setattr("src.inference_worker.process_task", predict_task)
 
     async def run(app: object) -> None:
         load.assert_called_once_with(settings)
@@ -236,8 +236,8 @@ async def test_worker_loads_model_once_before_consuming_and_closes_pool(
             await app.broker.publish(task, queue=task_queue(settings))
             await app.broker.publish(task, queue=task_queue(settings))
 
-    monkeypatch.setattr("src.worker.FastStream.run", run)
-    await run_worker(settings)
+    monkeypatch.setattr("src.inference_worker.FastStream.run", run)
+    await run_inference_worker(settings)
     load.assert_called_once_with(settings)
     assert pool.execute.await_count == 3
     close.assert_awaited_once_with(pool)
@@ -291,12 +291,12 @@ async def test_worker_does_not_start_when_model_load_fails(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "src.worker.load_model", Mock(side_effect=RuntimeError("model unavailable"))
+        "src.inference_worker.load_model", Mock(side_effect=RuntimeError("model unavailable"))
     )
     run = AsyncMock()
-    monkeypatch.setattr("src.worker.FastStream.run", run)
+    monkeypatch.setattr("src.inference_worker.FastStream.run", run)
     with pytest.raises(RuntimeError, match="model unavailable"):
-        await run_worker(settings)
+        await run_inference_worker(settings)
     run.assert_not_awaited()
 
 

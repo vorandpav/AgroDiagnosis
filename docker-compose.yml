@@ -18,10 +18,10 @@ services:
     networks:
       - agrodiagnosis-network
 
-  worker:
+  inference-worker:
     build: .
     profiles: [pipeline]
-    command: ["uv", "run", "--no-sync", "python", "-m", "src.worker"]
+    command: ["uv", "run", "--no-sync", "python", "-m", "src.inference_worker"]
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-agrodiagnosis}"
       RABBITMQ_URL: "amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/"
