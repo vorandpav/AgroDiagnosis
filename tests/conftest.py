@@ -1,6 +1,7 @@
 """Global pytest fixtures and test environment configuration."""
 
 import os
+from unittest.mock import AsyncMock, Mock
 
 # Ensure deterministic test execution: point Database URL to an unreachable port
 # before importing application modules, as Settings reads ENV on instantiation.
@@ -26,6 +27,18 @@ class _FakeModel(nn.Module):
         return logits
 
 
+def _patch_broker_and_results(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    """Avoid real RabbitMQ and results DDL during app lifespan in tests."""
+    broker = Mock()
+    broker.connect = AsyncMock()
+    broker.close = AsyncMock()
+    broker.declare_queue = AsyncMock()
+    broker.publish = AsyncMock()
+    monkeypatch.setattr("src.app.create_broker", lambda _settings: broker)
+    monkeypatch.setattr("src.app.initialize_results", AsyncMock())
+    return broker
+
+
 @pytest.fixture
 async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
     """Provides an asynchronous HTTP test client wrapping the FastAPI application.
@@ -40,6 +53,7 @@ async def client(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncClient]:
 
     monkeypatch.setattr("src.services.inference.load_model", _fake_load_model)
     monkeypatch.setattr("src.services.health.probe_mlflow_tracking", lambda _uri: None)
+    _patch_broker_and_results(monkeypatch)
 
     async with LifespanManager(app):
         transport = ASGITransport(app=app)

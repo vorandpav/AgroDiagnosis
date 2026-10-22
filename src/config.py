@@ -3,7 +3,10 @@
 Contains project settings loaded from environment variables and .env configuration files.
 """
 
-from pydantic import Field
+from pathlib import Path
+from typing import Self
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,6 +48,60 @@ class Settings(BaseSettings):
         default="champion",
         description="Model Registry alias loaded at application startup.",
     )
+    rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
+    task_queue: str = "agrodiagnosis.inference.v1"
+    task_queue_max_length: int = Field(
+        default=100,
+        gt=0,
+        description="Hard queue depth; overflow uses reject-publish.",
+    )
+    task_queue_soft_limit: int = Field(
+        default=60,
+        gt=0,
+        description=(
+            "Batch publisher waits at this depth so interactive HTTP tasks "
+            "keep headroom up to task_queue_max_length."
+        ),
+    )
+    task_storage_dir: Path = Path("task-data")
+    inference_min_seconds: float = Field(default=1.0, ge=0, allow_inf_nan=False)
+    publish_timeout_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
+    publish_retry_delay_seconds: float = Field(
+        default=0.5,
+        gt=0,
+        allow_inf_nan=False,
+        description="Backoff for batch_publisher when the soft/hard limit blocks publish.",
+    )
+    task_max_delivery_attempts: int = Field(
+        default=3,
+        ge=1,
+        description="Failed handler deliveries before reject-to-DLQ (no infinite requeue).",
+    )
+    task_retry_delay_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Delay before republishing a failed task for another attempt.",
+    )
+    worker_health_host: str = "0.0.0.0"
+    worker_health_port: int = Field(
+        default=8001,
+        gt=0,
+        lt=65536,
+        description="HTTP port for inference-worker /healthz during processing.",
+    )
+    worker_executor_workers: int = Field(
+        default=1,
+        ge=1,
+        description="Thread pool size; must match broker prefetch_count.",
+    )
+
+    @model_validator(mode="after")
+    def soft_limit_within_hard_limit(self) -> Self:
+        """Keep soft threshold at or below the broker hard ceiling."""
+        if self.task_queue_soft_limit > self.task_queue_max_length:
+            raise ValueError("task_queue_soft_limit must be <= task_queue_max_length")
+        return self
 
 
 def get_settings() -> Settings:

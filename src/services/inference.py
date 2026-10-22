@@ -17,7 +17,7 @@ from torchvision import transforms
 
 import mlflow
 from src.config import Settings
-from src.schemas import ProcessResponse
+from src.schemas import InferenceResult
 from src.services.health import probe_mlflow_tracking
 
 log = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def predict(
     class_names: list[str],
     image_bytes: bytes,
     loaded_model: str,
-) -> ProcessResponse:
+) -> InferenceResult:
     """Run a single-image forward pass and return the top class.
 
     Args:
@@ -93,7 +93,7 @@ def predict(
         logits = model(batch)
     probs = torch.softmax(logits, dim=1)[0]
     index = int(torch.argmax(probs).item())
-    return ProcessResponse(
+    return InferenceResult(
         label=class_names[index],
         confidence=float(probs[index].item()),
         model=loaded_model,

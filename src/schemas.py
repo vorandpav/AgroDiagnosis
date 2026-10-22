@@ -1,8 +1,10 @@
 """Application API Pydantic contracts and response schemas."""
 
 from enum import StrEnum
+from pathlib import PurePosixPath
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class HelloResponse(BaseModel):
@@ -53,12 +55,57 @@ class HealthReport(BaseModel):
     dependencies: dict[str, DependencyHealth]
 
 
-class ProcessResponse(BaseModel):
-    """Response schema for plant-disease inference."""
+class InferenceResult(BaseModel):
+    """Result of a single model forward pass."""
 
     label: str = Field(description="Predicted plant/disease class.")
     confidence: float = Field(description="Softmax probability of the predicted class.")
     model: str = Field(description="Loaded Model Registry reference (name@alias).")
+
+
+class TaskAccepted(BaseModel):
+    """Acknowledge that a task was accepted into the inference queue."""
+
+    task_id: UUID
+
+
+class InferenceTask(BaseModel):
+    """Define an inference command for an image in shared storage."""
+
+    task_id: UUID
+    image_path: str = Field(min_length=1, max_length=1024)
+
+    @field_validator("image_path")
+    @classmethod
+    def validate_image_path(cls, value: str) -> str:
+        """Validate a relative POSIX path within task storage."""
+        path = PurePosixPath(value)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError("image_path must be relative to task storage")
+        if "\\" in value or ":" in value or "\x00" in value:
+            raise ValueError("image_path must use portable POSIX path components")
+        return value
+
+
+class TaskResult(BaseModel):
+    """Define the persisted result of task processing."""
+
+    task_id: UUID
+    prediction: InferenceResult
+    model_version: str
+    processing_seconds: float = Field(ge=0, allow_inf_nan=False)
+
+
+class PublicationReport(BaseModel):
+    """Summarize confirmed publications for a batch."""
+
+    task_count: int = Field(ge=0)
+    elapsed_seconds: float = Field(gt=0, allow_inf_nan=False)
+
+    @property
+    def tasks_per_second(self) -> float:
+        """Return the measured publication rate."""
+        return self.task_count / self.elapsed_seconds
 
 
 class EvaluationRequest(BaseModel):

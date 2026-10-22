@@ -1,4 +1,63 @@
 services:
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks:
+      - agrodiagnosis-network
+
+  inference-worker:
+    build: .
+    command: ["uv", "run", "--no-sync", "python", "-m", "src.inference_worker"]
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-agrodiagnosis}"
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/"
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://host.docker.internal:5000}
+      MLFLOW_MODEL_NAME: ${MLFLOW_MODEL_NAME:-agrodiagnosis-plant-disease}
+      MLFLOW_MODEL_ALIAS: ${MLFLOW_MODEL_ALIAS:-champion}
+      TASK_STORAGE_DIR: /data
+      TASK_QUEUE: ${TASK_QUEUE:-agrodiagnosis.inference.v1}
+      TASK_QUEUE_MAX_LENGTH: ${TASK_QUEUE_MAX_LENGTH:-100}
+      TASK_QUEUE_SOFT_LIMIT: ${TASK_QUEUE_SOFT_LIMIT:-60}
+      INFERENCE_MIN_SECONDS: ${INFERENCE_MIN_SECONDS:-1.0}
+      TASK_MAX_DELIVERY_ATTEMPTS: ${TASK_MAX_DELIVERY_ATTEMPTS:-3}
+      WORKER_HEALTH_PORT: ${WORKER_HEALTH_PORT:-8001}
+      WORKER_EXECUTOR_WORKERS: ${WORKER_EXECUTOR_WORKERS:-1}
+    ports:
+      - "127.0.0.1:${WORKER_HEALTH_PORT:-8001}:8001"
+    volumes:
+      - ./task-data:/data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "uv run python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=3)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 60s
+    networks:
+      - agrodiagnosis-network
+
   postgres:
     image: postgres:16-alpine
     container_name: agrodiagnosis-postgres
@@ -39,10 +98,20 @@ services:
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://host.docker.internal:5000}
       MLFLOW_MODEL_NAME: ${MLFLOW_MODEL_NAME:-agrodiagnosis-plant-disease}
       MLFLOW_MODEL_ALIAS: ${MLFLOW_MODEL_ALIAS:-champion}
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/"
+      TASK_STORAGE_DIR: /data
+      TASK_QUEUE: ${TASK_QUEUE:-agrodiagnosis.inference.v1}
+      TASK_QUEUE_MAX_LENGTH: ${TASK_QUEUE_MAX_LENGTH:-100}
+      TASK_QUEUE_SOFT_LIMIT: ${TASK_QUEUE_SOFT_LIMIT:-60}
+      INFERENCE_MIN_SECONDS: ${INFERENCE_MIN_SECONDS:-1.0}
+    volumes:
+      - ./task-data:/data
     ports:
       - "${APP_PORT:-8000}:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "uv run python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)\"" ]
@@ -60,6 +129,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  rabbitmq-data:
   postgres-data:
 
 networks:
