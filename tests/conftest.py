@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, Mock
 # Ensure deterministic test execution: point Database URL to an unreachable port
 # before importing application modules, as Settings reads ENV on instantiation.
 os.environ["DATABASE_URL"] = "postgresql://postgres:postgres@127.0.0.1:59999/agrodiagnosis"
+# Unit tests must not open a real OTLP exporter. Tracing tests install their own provider.
+os.environ["OTEL_SDK_DISABLED"] = "true"
 
 from collections.abc import AsyncIterator
 

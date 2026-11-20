@@ -1,3 +1,6 @@
+include:
+  - observability/compose.yaml
+
 services:
   rabbitmq:
     image: rabbitmq:4.1-management
@@ -8,8 +11,12 @@ services:
     ports:
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
+      - "127.0.0.1:15692:15692"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+    configs:
+      - source: rabbitmq_enabled_plugins
+        target: /etc/rabbitmq/enabled_plugins
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 10s
@@ -36,6 +43,15 @@ services:
       TASK_MAX_DELIVERY_ATTEMPTS: ${TASK_MAX_DELIVERY_ATTEMPTS:-3}
       WORKER_HEALTH_PORT: ${WORKER_HEALTH_PORT:-8001}
       WORKER_EXECUTOR_WORKERS: ${WORKER_EXECUTOR_WORKERS:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OTEL_SERVICE_NAME: agrodiagnosis-worker
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${VERSION:-0.1.0},deployment.environment.name=${ENVIRONMENT:-development},service.instance.id=${WORKER_INSTANCE_ID:-inference-worker}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_BSP_SCHEDULE_DELAY: "1000"
+      OTEL_BSP_EXPORT_TIMEOUT: "2000"
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
     ports:
       - "127.0.0.1:${WORKER_HEALTH_PORT:-8001}:${WORKER_HEALTH_PORT:-8001}"
     volumes:
@@ -107,6 +123,14 @@ services:
       TASK_QUEUE_SOFT_LIMIT: ${TASK_QUEUE_SOFT_LIMIT:-60}
       INFERENCE_MIN_SECONDS: ${INFERENCE_MIN_SECONDS:-1.0}
       WORKER_HEALTH_URL: http://inference-worker:${WORKER_HEALTH_PORT:-8001}/healthz
+      OTEL_SERVICE_NAME: agrodiagnosis-api
+      OTEL_RESOURCE_ATTRIBUTES: "service.version=${VERSION:-0.1.0},deployment.environment.name=${ENVIRONMENT:-development},service.instance.id=api"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_BSP_SCHEDULE_DELAY: "1000"
+      OTEL_BSP_EXPORT_TIMEOUT: "2000"
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
     volumes:
       - ./task-data:/data
     ports:
@@ -133,6 +157,43 @@ services:
       - agrodiagnosis-network
     restart: unless-stopped
 
+  source:
+    profiles:
+      - source
+    build:
+      context: .
+      dockerfile: Dockerfile
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'export OTEL_RESOURCE_ATTRIBUTES="service.version=${VERSION:-0.1.0},deployment.environment.name=${ENVIRONMENT:-development},service.instance.id=$${SOURCE_INSTANCE_ID:-$${HOSTNAME:-source}}"; exec uv run --no-sync python -m src.scripts.batch_publisher "$$@"'
+      - batch_publisher
+    command: []
+    environment:
+      RABBITMQ_URL: "amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/"
+      TASK_QUEUE: ${TASK_QUEUE:-agrodiagnosis.inference.v1}
+      EVALUATE_TASK_QUEUE: ${EVALUATE_TASK_QUEUE:-agrodiagnosis.evaluate.v1}
+      TASK_QUEUE_MAX_LENGTH: ${TASK_QUEUE_MAX_LENGTH:-100}
+      TASK_QUEUE_SOFT_LIMIT: ${TASK_QUEUE_SOFT_LIMIT:-60}
+      PUBLISH_TIMEOUT_SECONDS: ${PUBLISH_TIMEOUT_SECONDS:-5.0}
+      PUBLISH_RETRY_DELAY_SECONDS: ${PUBLISH_RETRY_DELAY_SECONDS:-0.5}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OTEL_SERVICE_NAME: agrodiagnosis-source
+      SOURCE_INSTANCE_ID: ${SOURCE_INSTANCE_ID:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      OTEL_TRACES_SAMPLER: ${OTEL_TRACES_SAMPLER:-parentbased_always_on}
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-false}
+      OTEL_BSP_SCHEDULE_DELAY: "1000"
+      OTEL_BSP_EXPORT_TIMEOUT: "2000"
+      OTEL_METRIC_EXPORT_INTERVAL: "5000"
+    volumes:
+      - ./task-data:/data:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - agrodiagnosis-network
+
 volumes:
   rabbitmq-data:
   postgres-data:
@@ -140,3 +201,7 @@ volumes:
 networks:
   agrodiagnosis-network:
     driver: bridge
+
+configs:
+  rabbitmq_enabled_plugins:
+    content: "[rabbitmq_management,rabbitmq_prometheus].\n"

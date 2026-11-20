@@ -16,6 +16,7 @@ from faststream.rabbit import RabbitBroker
 
 from src.config import Settings
 from src.db.task_results import wait_for_task_results
+from src.logging_config import task_id_context
 from src.messaging.publishing import (
     publish_evaluate_task_with_backoff,
     publish_inference_task_with_backoff,
@@ -71,8 +72,9 @@ async def publish_inference_manifest(
     started = time.perf_counter()
     task_count = 0
     for task in read_tasks(manifest):
-        await publish_inference_task_with_backoff(broker, task, settings)
-        log.info("Published inference task %s", task.task_id)
+        with task_id_context(str(task.task_id)):
+            await publish_inference_task_with_backoff(broker, task, settings)
+            log.info("Published inference task")
         task_count += 1
     return PublicationReport(task_count=task_count, elapsed_seconds=time.perf_counter() - started)
 
@@ -86,8 +88,9 @@ async def batch_process_evaluate(
     """Publish evaluation images and return every stored worker result."""
     deadline = asyncio.get_running_loop().time() + settings.evaluation_timeout_seconds
     for task in tasks:
-        await publish_evaluate_task_with_backoff(broker, task, settings, deadline=deadline)
-        log.info("Published evaluation task %s", task.task_id)
+        with task_id_context(str(task.task_id)):
+            await publish_evaluate_task_with_backoff(broker, task, settings, deadline=deadline)
+            log.info("Published evaluation task")
     task_ids = [task.task_id for task in tasks]
     return await wait_for_task_results(
         pool,

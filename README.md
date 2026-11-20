@@ -172,3 +172,74 @@ Measured on 2026-10-22 (publisher process RSS; no inference-worker required for 
    `docker compose run -d --name inference-worker-2 -e WORKER_HEALTH_PORT=8002 -p 127.0.0.1:8002:8002 inference-worker`
 4. `curl` worker `/healthz` during a slow inference (`INFERENCE_MIN_SECONDS=5`).
 5. `docker compose kill -s SIGTERM` a busy worker; in-flight task should complete or be redelivered, not silently drop.
+
+## Observability
+
+JSON logs + OpenTelemetry traces/metrics behind Compose profiles. Plain
+`docker compose up -d` still starts only the app stack (app, worker, RabbitMQ,
+Postgres). Observability backends never sit under app/worker `depends_on`.
+
+### Why this stack
+
+| Choice | Why |
+|---|---|
+| JSON on stdout via stdlib `logging` | One line per event, `task_id` / `trace_id` / `request_id` as fields; no third-party log SDK in the app hot path |
+| VictoriaLogs | Field search (`task_id:…`) without exploding stream-label cardinality; ELK would blow the ~1.5GiB stand budget |
+| OTLP push for metrics | Short-lived `source` dies before a scrape window; push survives process exit after `force_flush` |
+| Prometheus scrape for RabbitMQ | Broker already exposes `/metrics/per-object`; collector scrapes `rabbitmq:15692` |
+| Sampler (stand) | `parentbased_always_on` so every lab task is visible |
+| Sampler (prod suggestion) | `parentbased_traceidratio` ≈ 0.05–0.1 plus collector tail sampling of errors |
+
+### Cardinality
+
+Exported series use low-cardinality labels (`route`, `status`, `result`, `instance` /
+`job`, RabbitMQ `queue`). Cardinality ≈ product of those label value counts.
+If `task_id` were a metric label on a batch of N tasks, you would create ~N new
+time series per instrument (and keep them until retention) — a classic cardinality
+explosion; keep `task_id` in logs/trace attributes only.
+
+### Profiles
+
+```bash
+docker compose up -d                              # app stack only
+docker compose --profile logs up -d               # + VictoriaLogs + collector
+docker compose --profile traces up -d             # + Tempo + collector
+docker compose --profile metrics up -d            # + VictoriaMetrics + collector
+docker compose --profile observability up -d --build   # all backends + Grafana
+```
+
+Grafana UI: http://127.0.0.1:3000 (admin / `GF_SECURITY_ADMIN_PASSWORD`, default
+`agrodiagnosis` from `.env.example`). Dashboard **Pipeline** is provisioned under
+folder AgroDiagnosis. Datasources: VictoriaMetrics, Tempo, VictoriaLogs (plugin
+baked into `observability/grafana/Dockerfile` so defence `up` does not download
+plugins).
+
+Log ↔ trace: log field `trace_id` opens Tempo; a Tempo span opens VictoriaLogs
+with `trace_id:"…"`. Exemplars on latency histograms are **not** wired through
+the OTLP → remote_write path today — only the log↔trace links are guaranteed.
+
+### Alerts (Grafana Alerting, provisioned)
+
+| Rule | Condition | `for` | Why |
+|---|---|---|---|
+| Working queue filled >90% | `rabbitmq_queue_messages{queue="agrodiagnosis.inference.v1"} / 100 > 0.9` | `1m` | One scrape near the hard limit during a burst is noise; sustained near-full means consumers cannot drain |
+| Messages in inference DLQ | `rabbitmq_queue_messages{queue="agrodiagnosis.inference.v1.dlq"} > 0` | `30s` | Any DLQ message is abnormal; 30s filters a single empty scrape without delaying the demo |
+
+Queue depth panel threshold and the 90% alert assume `TASK_QUEUE_MAX_LENGTH=100`
+(compose default). Soft limit 60 will **not** reach 90% of hard 100 under normal
+batch publish. For the defence queue-alert demo set
+`TASK_QUEUE_SOFT_LIMIT=TASK_QUEUE_MAX_LENGTH` (e.g. both `100` or both `30`) so
+the soft ceiling sits on the hard line, then flood the queue.
+
+### Memory budget (~1.5GiB)
+
+| Service | `mem_limit` | Observed (`docker stats --no-stream`, after smoke) |
+|---|---:|---:|
+| otel-collector | 256MiB | 194MiB |
+| VictoriaLogs | 512MiB | 23MiB |
+| Tempo | 384MiB | 228MiB |
+| VictoriaMetrics | 256MiB | 98MiB |
+| Grafana | 256MiB | 78MiB |
+| **Total limits** | **1664MiB** | **~621MiB used** |
+
+Retention for logs/metrics/traces storage: **3 days**.

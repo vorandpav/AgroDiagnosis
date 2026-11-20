@@ -11,6 +11,7 @@ from src.exceptions import QueueFullError
 from src.messaging.broker import retry_after_seconds
 from src.schemas import TaskAccepted, TaskResult
 from src.services import tasks as tasks_service
+from src.telemetry import record_span_exception
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ async def create_task(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except QueueFullError:
+    except QueueFullError as exc:
+        record_span_exception(exc)
         retry_after = str(retry_after_seconds(settings))
         log.warning("Rejecting task upload: queue full (Retry-After=%s)", retry_after)
         return JSONResponse(

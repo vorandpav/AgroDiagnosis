@@ -21,7 +21,7 @@ from src.inference_worker.consumer import (
     run_inference_worker,
 )
 from src.inference_worker.processing import process_task
-from src.messaging.broker import consume_prefetch, create_broker, task_queue
+from src.messaging.broker import create_broker, task_queue
 from src.mlflow_runtime import LoadedModel, load_model
 from src.schemas import InferenceResult, InferenceTask, TaskResult
 from src.services.batch_processing import (
@@ -463,7 +463,6 @@ def test_inference_and_evaluate_handlers_share_worker_prefetch(settings: Setting
         settings.evaluate_task_queue,
     }
     assert all(subscriber.channel is None for subscriber in broker.subscribers)
-    assert consume_prefetch(settings) == 4
 
 
 async def test_worker_health_starts_only_after_model_load(

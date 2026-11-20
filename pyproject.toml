@@ -10,8 +10,12 @@ requires-python = ">=3.12"
 dependencies = [
     "asyncpg>=0.31.0",
     "fastapi>=0.141.1",
-    "faststream[rabbit]>=0.6,<0.7",
+    "faststream[otel,rabbit]>=0.6,<0.7",
     "mlflow>=3.16.1",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.45.2",
+    "opentelemetry-instrumentation-asyncpg>=0.66b2",
+    "opentelemetry-instrumentation-fastapi>=0.66b2",
+    "opentelemetry-instrumentation-system-metrics>=0.66b2",
     "pillow>=12.3.0",
     "pydantic-settings>=2.15.0",
     "python-multipart>=0.0.32",

@@ -1,0 +1,177 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: pipeline
+    folder: AgroDiagnosis
+    interval: 30s
+    rules:
+      # for: 1m — a single scrape near the hard limit during a burst is noise;
+      # sustained >90% of x-max-length means consumers cannot drain the working queue.
+      - uid: inference-queue-90pct
+        title: Working queue filled >90% of max length
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: rabbitmq_queue_messages{queue="agrodiagnosis.inference.v1"} / 100
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0.9
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: Inference working queue above 90% of TASK_QUEUE_MAX_LENGTH (100).
+          description: >-
+            Depth stays high when workers cannot keep up. Soft=60 will not reach
+            90 of hard=100 under normal batch publish; for defence set
+            TASK_QUEUE_SOFT_LIMIT=TASK_QUEUE_MAX_LENGTH so the soft ceiling sits
+            on the hard line.
+        labels:
+          severity: warning
+        isPaused: false
+
+      # for: 30s — any DLQ message is abnormal (poison / max deliveries);
+      # half a minute filters a single empty scrape flicker without delaying the demo.
+      - uid: inference-dlq-messages
+        title: Messages appeared in inference DLQ
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              datasource:
+                type: prometheus
+                uid: victoriametrics
+              editorMode: code
+              expr: rabbitmq_queue_messages{queue="agrodiagnosis.inference.v1.dlq"}
+              instant: true
+              intervalMs: 1000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        noDataState: OK
+        execErrState: Error
+        for: 30s
+        annotations:
+          summary: agrodiagnosis.inference.v1.dlq is non-empty.
+          description: Poison or exhausted retries land in the DLQ; investigate task_id in VictoriaLogs.
+        labels:
+          severity: critical
+        isPaused: false

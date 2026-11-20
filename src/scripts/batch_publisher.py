@@ -18,6 +18,7 @@ from src.config import Settings, get_settings
 from src.logging_config import setup_logging
 from src.messaging.broker import create_broker, dead_letter_queue, task_queue
 from src.services.batch_processing import publish_inference_manifest
+from src.telemetry import force_flush_telemetry, setup_telemetry
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +44,11 @@ def main() -> None:
     args = parser.parse_args()
     settings = get_settings()
     setup_logging(settings.log_level)
-    asyncio.run(run_batch_publisher(args.manifest, settings))
+    setup_telemetry(settings.inference_min_seconds)
+    try:
+        asyncio.run(run_batch_publisher(args.manifest, settings))
+    finally:
+        force_flush_telemetry()
 
 
 if __name__ == "__main__":

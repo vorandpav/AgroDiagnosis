@@ -3,6 +3,7 @@
 from math import ceil
 
 from faststream.rabbit import Channel, RabbitBroker, RabbitQueue
+from faststream.rabbit.opentelemetry import RabbitTelemetryMiddleware
 
 from src.config import Settings
 
@@ -12,7 +13,8 @@ def create_broker(settings: Settings) -> RabbitBroker:
 
     Inference and evaluation subscribers share this channel. A full evaluate
     queue cannot occupy slots while the user queue is empty, and a user task
-    is not lined up behind the evaluate backlog.
+    is not lined up behind the evaluate backlog. Telemetry middleware injects
+    and extracts the W3C traceparent on every publish and consume.
     """
     return RabbitBroker(
         settings.rabbitmq_url,
@@ -21,6 +23,7 @@ def create_broker(settings: Settings) -> RabbitBroker:
             publisher_confirms=True,
             on_return_raises=True,
         ),
+        middlewares=(RabbitTelemetryMiddleware(),),
     )
 
 

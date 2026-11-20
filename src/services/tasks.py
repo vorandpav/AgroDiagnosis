@@ -12,6 +12,7 @@ from faststream.rabbit import RabbitBroker
 from src.config import Settings
 from src.db import task_results
 from src.exceptions import QueueFullError
+from src.logging_config import task_id_context
 from src.messaging.publishing import publish_inference_task
 from src.schemas import InferenceTask, TaskAccepted, TaskResult
 
@@ -47,12 +48,13 @@ async def submit_uploaded_task(
     absolute.parent.mkdir(parents=True, exist_ok=True)
     absolute.write_bytes(image_bytes)
     task = InferenceTask(task_id=task_id, image_path=relative.as_posix())
-    try:
-        await publish_inference_task(broker, task, settings)
-    except QueueFullError:
-        absolute.unlink(missing_ok=True)
-        raise
-    log.info("Accepted task %s (%s)", task_id, task.image_path)
+    with task_id_context(str(task_id)):
+        try:
+            await publish_inference_task(broker, task, settings)
+        except QueueFullError:
+            absolute.unlink(missing_ok=True)
+            raise
+        log.info("Accepted task (%s)", task.image_path)
     return TaskAccepted(task_id=task_id)
 
 

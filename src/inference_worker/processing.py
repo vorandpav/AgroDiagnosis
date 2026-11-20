@@ -2,11 +2,13 @@
 
 import time
 
+from opentelemetry import trace
 from torch import nn
 
 from src.config import Settings
 from src.inference_worker.predict import predict
 from src.schemas import InferenceTask, TaskResult
+from src.telemetry import record_inference_duration
 
 
 def process_task(
@@ -18,17 +20,22 @@ def process_task(
     model_version: str,
 ) -> TaskResult:
     """Run synchronous processing with a configured minimum duration."""
-    started = time.perf_counter()
-    root = settings.task_storage_dir.resolve()
-    image_path = (root / task.image_path).resolve()
-    if not image_path.is_relative_to(root):
-        raise ValueError("Image path is outside task storage")
-    prediction = predict(model, class_names, image_path.read_bytes())
-    time.sleep(max(0, settings.inference_min_seconds - (time.perf_counter() - started)))
-    return TaskResult(
-        task_id=task.task_id,
-        prediction=prediction,
-        model_ref=model_ref,
-        model_version=model_version,
-        processing_seconds=time.perf_counter() - started,
-    )
+    with trace.get_tracer(__name__).start_as_current_span("inference") as span:
+        span.set_attribute("alias", settings.mlflow_model_alias)
+        span.set_attribute("model_version", model_version)
+        started = time.perf_counter()
+        root = settings.task_storage_dir.resolve()
+        image_path = (root / task.image_path).resolve()
+        if not image_path.is_relative_to(root):
+            raise ValueError("Image path is outside task storage")
+        prediction = predict(model, class_names, image_path.read_bytes())
+        time.sleep(max(0, settings.inference_min_seconds - (time.perf_counter() - started)))
+        elapsed = time.perf_counter() - started
+        record_inference_duration(elapsed)
+        return TaskResult(
+            task_id=task.task_id,
+            prediction=prediction,
+            model_ref=model_ref,
+            model_version=model_version,
+            processing_seconds=elapsed,
+        )
