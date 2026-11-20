@@ -11,7 +11,7 @@ from torchvision import transforms
 
 from src.schemas import InferenceResult
 
-#TODO: Make these configurable via settings or model metadata.
+# TODO: Make these configurable via settings or model metadata.
 
 _IMAGE_SIZE = (224, 224)
 _IMAGENET_MEAN = (0.485, 0.456, 0.406)
