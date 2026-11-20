@@ -44,3 +44,11 @@ training/multirun/
 
 # MLflow
 deploy/mlflow/mlartifacts/
+
+# Tasks
+task-data/**
+!task-data/README.md
+!task-data/scripts/
+!task-data/scripts/**
+task-data/scripts/**/__pycache__/
+task-data/scripts/**/*.pyc

@@ -1,0 +1,115 @@
+extensions:
+  docker_observer:
+    endpoint: unix:///var/run/docker.sock
+    timeout: 5s
+    # Port-less endpoint (port 0) once per container, including source which publishes none.
+    # Per-port endpoints stay available but the filelog rule below ignores them.
+    include_all_containers: true
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+  prometheus/rabbitmq:
+    config:
+      scrape_configs:
+        - job_name: rabbitmq
+          scrape_interval: 15s
+          metrics_path: /metrics/per-object
+          static_configs:
+            - targets: ["rabbitmq:15692"]
+  receiver_creator:
+    watch_observers: [docker_observer]
+    resource_attributes:
+      container:
+        container.name: ""
+        container.image.name: ""
+        service: '`labels["com.docker.compose.service"]`'
+        env: "${env:ENVIRONMENT}"
+    receivers:
+      filelog:
+        # port == 0 is the single port-less endpoint, so a container with several
+        # published ports is tailed once. source has no ports and is included here.
+        rule: type == "container" && port == 0 && labels["com.docker.compose.project"] == "${env:COMPOSE_PROJECT_NAME}" && (labels["com.docker.compose.service"] == "app" || labels["com.docker.compose.service"] == "inference-worker" || labels["com.docker.compose.service"] == "postgres" || labels["com.docker.compose.service"] == "rabbitmq" || labels["com.docker.compose.service"] == "source" || labels["com.docker.compose.service"] == "victorialogs")
+        config:
+          include:
+            - '`"/var/lib/docker/containers/" + container_id + "/" + container_id + "-json.log"`'
+          start_at: end
+          operators:
+            - type: json_parser
+              timestamp:
+                parse_from: attributes.time
+                layout_type: gotime
+                layout: "2006-01-02T15:04:05.999999999Z"
+              on_error: send
+            - type: regex_replace
+              field: attributes.log
+              regex: '\n+$'
+              replace: ""
+            - type: move
+              from: attributes.log
+              to: body
+            - type: json_parser
+              parse_from: body
+              if: 'hasPrefix(body, "{")'
+              on_error: send_quiet
+            - type: add
+              field: resource.level
+              value: EXPR(attributes["level"])
+              if: 'attributes["level"] != nil'
+            - type: remove
+              field: attributes.level
+              if: 'attributes["level"] != nil'
+            - type: remove
+              field: attributes.service
+              if: 'attributes["service"] != nil'
+            - type: move
+              from: attributes.message
+              to: body
+              if: 'attributes["message"] != nil'
+
+processors:
+  resource/stream:
+    attributes:
+      - key: container.name
+        action: delete
+      - key: container.image.name
+        action: delete
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 180
+    spike_limit_mib: 40
+  batch:
+
+exporters:
+  otlp_http/victorialogs:
+    logs_endpoint: http://victorialogs:9428/insert/opentelemetry/v1/logs
+    headers:
+      VL-Stream-Fields: service,level,env
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  prometheus_remote_write:
+    endpoint: http://victoriametrics:8428/api/v1/write
+    tls:
+      insecure: true
+
+service:
+  extensions: [docker_observer, health_check]
+  pipelines:
+    logs:
+      receivers: [receiver_creator]
+      processors: [memory_limiter, resource/stream, batch]
+      exporters: [otlp_http/victorialogs]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp, prometheus/rabbitmq]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus_remote_write]

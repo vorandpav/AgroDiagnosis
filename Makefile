@@ -29,15 +29,18 @@ fmt:
 	uv run ruff check . --fix
 	uv run ruff format .
 
-# Run test suite with coverage report
+# Tests
 test:
-	uv run pytest --cov=src --cov-report=term-missing tests/
+	uv run pytest --cov=src --cov-report=term-missing -m "not integration" tests/
+
+test-integration:
+	uv run pytest -q -m integration
 
 # Run local development server
 run:
 	uv run uvicorn src.app:app --reload --port 8000
 
-# Spin up Docker containers (app + postgres)
+# Spin up Docker stack (app, inference-worker, rabbitmq, postgres)
 up:
 	docker compose up -d --build
 
@@ -88,6 +91,5 @@ train-grid:
 promote:
 	cd training && uv run --extra $(TORCH_EXTRA) python scripts/promote_champion.py
 
-# Smoke POST /process (override: make process IMAGE=path/to.jpg)
-process:
-	curl -sS -F "file=@$(IMAGE)" http://localhost:8000/process
+measure-backpressure:
+	uv run python -m src.scripts.measure_backpressure --tasks 80 --soft 20 --hard 30 --steady --work-seconds 0.5

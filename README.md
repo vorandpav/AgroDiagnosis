@@ -51,8 +51,9 @@ Read [`Makefile`](Makefile) for additional commands.
 | GET    | /healthz        | Quick liveness probe for orchestration systems     |
 | GET    | /api/v1/version | Current version                                    |
 | GET    | /api/v1/health  | Comprehensive readiness report across dependencies |
-| POST   | /evaluate       | Evaluate a labelled ZIP dataset and log results to MLflow |
-| POST   | /process        | Plant-disease inference (multipart image `file`)   |
+| POST   | /evaluate         | Evaluate a labelled ZIP dataset and log results to MLflow |
+| POST   | /api/v1/tasks     | Accept an image into the inference queue (202 / 503) |
+| GET    | /api/v1/tasks/{id}| Fetch a finished task result (404 while processing) |
 
 Swagger UI is available at `/docs`.
 
@@ -64,5 +65,181 @@ Apple/Apple_scab/image1.jpg
 Cherry/Powdery_mildew/image2.png
 ```
 
-A single enclosing directory such as `test/` is also supported. Class names must
-match `src/class_names.json`.
+A single enclosing directory such as `test/` is also supported. Class labels must
+come from the `class_names.json` artifact on the registered model's training run
+(logged by training); the worker fails to start without it.
+
+Only `inference-worker` calls `load_model` (in `src/mlflow_runtime.py`) and runs
+`predict`: it resolves the Registry alias once at startup and pins that version.
+The API publishes tasks / waits for Postgres results and does not hold model weights.
+
+## Inference pipeline (backpressure lab)
+
+```text
+prepare_batch → batch_publisher ─┐
+POST /api/v1/tasks ──────────────┼─► RabbitMQ (bounded) ─► inference-worker ─► Postgres
+                                 │
+soft limit (batch only)          hard limit (reject-publish → HTTP 503)
+```
+
+Code layout (pipeline vs HTTP vs worker):
+
+| Folder | Role |
+|---|---|
+| `src/messaging/` | Queue definition, publish, soft/hard backpressure |
+| `src/services/tasks.py` | Upload → storage + publish |
+| `src/db/` | `Database` pool and `task_results` repository |
+| `src/inference_worker/` | `load_model` / `predict`, FastStream consumer, `/healthz` |
+| `src/scripts/batch_publisher.py` | Batch producer CLI |
+| `src/api/` | Thin routes via `Depends` → services |
+
+Postgres creates `task_results` from the single `CREATE TABLE` in `initialize_results` on a clean database. After a schema change, drop the Postgres volume and start again; there are no migrations.
+
+### Run locally
+
+```bash
+docker compose up -d rabbitmq postgres inference-worker
+uv run uvicorn src.app:app --reload
+```
+
+Full stack in Docker (app + worker + RabbitMQ + Postgres):
+
+```bash
+docker compose up -d --build
+```
+
+Worker liveness while inference runs (proves the event loop is not blocked):
+
+```bash
+curl -s http://127.0.0.1:8001/healthz
+```
+
+Batch load (waits at soft watermark; does not steal the HTTP headroom):
+
+```bash
+uv run python task-data/scripts/prepare_batch.py training/data/plant-diseases-processed/val --name demo --limit 100
+uv run python -m src.scripts.batch_publisher task-data/demo/tasks.jsonl
+```
+
+### Design notes for the defence
+
+| Topic | Choice | Why |
+|---|---|---|
+| `prefetch_count` | `= WORKER_EXECUTOR_WORKERS` on the shared channel | Both queues share one prefetch. An empty queue holds no slots; a user task waits only for in-flight work, not for the evaluate backlog |
+| Inference off the loop | `ThreadPoolExecutor` | `torch` / `time.sleep` must not block FastStream; `/healthz` on `:8001` stays responsive under load |
+| Batch vs HTTP | soft limit for batch, hard for everyone | Overnight jobs wait below soft watermark; interactive `POST /tasks` may use the remaining band until hard `reject-publish` → **503 + Retry-After** |
+| `Retry-After` | `ceil(INFERENCE_MIN_SECONDS)` | Approximate time for one busy worker to free a slot |
+| Ack policy | manual: ack after DB write | Ack-before-save can lose results on crash; nack/requeue forever creates poison loops |
+| Retries → DLQ | `TASK_MAX_DELIVERY_ATTEMPTS` then `reject(requeue=False)` | Bounded retries with header `x-delivery-attempt`, then dead-letter queue |
+| Idempotency | `task_results.task_id` PK + `ON CONFLICT DO NOTHING` | Safe under at-least-once redelivery |
+| Graceful stop | Compose `stop_grace_period: 60s` + SIGTERM | Worker finishes the in-flight message before exit |
+| Model version pin | `load_model` at worker startup | Registry alias resolves once per worker process; results store `model_ref` / `model_version` |
+
+### Experiment results (§7)
+
+Re-run locally (RabbitMQ must be up; workers optional for the steady rows):
+
+```bash
+docker compose up -d rabbitmq
+uv run python -m src.scripts.measure_backpressure --tasks 80 --soft 20 --hard 30 --steady --work-seconds 0.5
+make test-integration   # Testcontainers: hard reject-publish on a real broker
+```
+
+Measured on 2026-10-22 (publisher process RSS; no inference-worker required for the first three rows; steady rows use slow stand-in consumers with the same soft/hard publish path as `batch_publisher`):
+
+| Scenario | Published | Elapsed (s) | Max depth | Peak RSS (MiB) | Rate (tasks/s) |
+|---|---:|---:|---:|---:|---:|
+| unbounded (no limit) | 80 | 0.47 | 80 | 49.6 | 171.71 |
+| hard reject-publish (max=30) | 30 | 0.17 | 30 | 49.6 | 173.98 |
+| soft backoff (soft=20, hard=30) | 20 | 1.23 | 20 | 49.6 | 16.25 |
+| steady soft=20 consumers=1 work=0.5s | 40 | 9.75 | 20 | 49.8 | 4.10 |
+| steady soft=20 consumers=2 work=0.5s | 40 | 4.72 | 20 | 49.9 | 8.47 |
+
+**Conclusions**
+
+- Without a bound, depth grows with the burst (80/80) while publisher RSS stays flat — the source streams JSONL and does not buffer the batch in RAM.
+- With `x-max-length` + `reject-publish`, depth never exceeds the hard limit; further publishes fail immediately (HTTP maps this to **503 + Retry-After**).
+- Soft watermark keeps batch depth ≤ soft even when hard headroom remains; interactive `POST /api/v1/tasks` can still use the band between soft and hard.
+- In steady state, source rate tracks consumer capacity: doubling stand-in consumers roughly doubled publish rate (4.10 → 8.47 tasks/s) with **no publisher code change**, and max depth stayed at the soft limit.
+- Soft signal = AMQP passive declare (not Management API); hard signal = publisher confirm reject. Management UI (`15672`) is for observation only.
+- The same coupling holds for real `inference-worker` when `INFERENCE_MIN_SECONDS` sets per-task duration.
+
+### Defence demo checklist
+
+1. Publish a large batch; watch queue depth in RabbitMQ Management stay ≤ soft for batch, ≤ hard overall.
+2. Flood `POST /api/v1/tasks` until **503** with `Retry-After`; confirm no pending rows for rejected uploads.
+3. Start a second worker (separate health port):  
+   `docker compose run -d --name inference-worker-2 -e WORKER_HEALTH_PORT=8002 -p 127.0.0.1:8002:8002 inference-worker`
+4. `curl` worker `/healthz` during a slow inference (`INFERENCE_MIN_SECONDS=5`).
+5. `docker compose kill -s SIGTERM` a busy worker; in-flight task should complete or be redelivered, not silently drop.
+
+## Observability
+
+JSON logs + OpenTelemetry traces/metrics behind Compose profiles. Plain
+`docker compose up -d` still starts only the app stack (app, worker, RabbitMQ,
+Postgres). Observability backends never sit under app/worker `depends_on`.
+
+### Why this stack
+
+| Choice | Why |
+|---|---|
+| JSON on stdout via stdlib `logging` | One line per event, `task_id` / `trace_id` / `request_id` as fields; no third-party log SDK in the app hot path |
+| VictoriaLogs | Field search (`task_id:…`) without exploding stream-label cardinality; ELK would blow the ~1.5GiB stand budget |
+| OTLP push for metrics | Short-lived `source` dies before a scrape window; push survives process exit after `force_flush` |
+| Prometheus scrape for RabbitMQ | Broker already exposes `/metrics/per-object`; collector scrapes `rabbitmq:15692` |
+| Sampler (stand) | `parentbased_always_on` so every lab task is visible |
+| Sampler (prod suggestion) | `parentbased_traceidratio` ≈ 0.05–0.1 plus collector tail sampling of errors |
+
+### Cardinality
+
+Exported series use low-cardinality labels (`route`, `status`, `result`, `instance` /
+`job`, RabbitMQ `queue`). Cardinality ≈ product of those label value counts.
+If `task_id` were a metric label on a batch of N tasks, you would create ~N new
+time series per instrument (and keep them until retention) — a classic cardinality
+explosion; keep `task_id` in logs/trace attributes only.
+
+### Profiles
+
+```bash
+docker compose up -d                              # app stack only
+docker compose --profile logs up -d               # + VictoriaLogs + collector
+docker compose --profile traces up -d             # + Tempo + collector
+docker compose --profile metrics up -d            # + VictoriaMetrics + collector
+docker compose --profile observability up -d --build   # all backends + Grafana
+```
+
+Grafana UI: http://127.0.0.1:3000 (admin / `GF_SECURITY_ADMIN_PASSWORD`, default
+`agrodiagnosis` from `.env.example`). Dashboard **Pipeline** is provisioned under
+folder AgroDiagnosis. Datasources: VictoriaMetrics, Tempo, VictoriaLogs (plugin
+baked into `observability/grafana/Dockerfile` so defence `up` does not download
+plugins).
+
+Log ↔ trace: log field `trace_id` opens Tempo; a Tempo span opens VictoriaLogs
+with `trace_id:"…"`. Exemplars on latency histograms are **not** wired through
+the OTLP → remote_write path today — only the log↔trace links are guaranteed.
+
+### Alerts (Grafana Alerting, provisioned)
+
+| Rule | Condition | `for` | Why |
+|---|---|---|---|
+| Working queue filled >90% | `rabbitmq_queue_messages{queue="agrodiagnosis.inference.v1"} / 100 > 0.9` | `1m` | One scrape near the hard limit during a burst is noise; sustained near-full means consumers cannot drain |
+| Messages in inference DLQ | `rabbitmq_queue_messages{queue="agrodiagnosis.inference.v1.dlq"} > 0` | `30s` | Any DLQ message is abnormal; 30s filters a single empty scrape without delaying the demo |
+
+Queue depth panel threshold and the 90% alert assume `TASK_QUEUE_MAX_LENGTH=100`
+(compose default). Soft limit 60 will **not** reach 90% of hard 100 under normal
+batch publish. For the defence queue-alert demo set
+`TASK_QUEUE_SOFT_LIMIT=TASK_QUEUE_MAX_LENGTH` (e.g. both `100` or both `30`) so
+the soft ceiling sits on the hard line, then flood the queue.
+
+### Memory budget (~1.5GiB)
+
+| Service | `mem_limit` | Observed (`docker stats --no-stream`, after smoke) |
+|---|---:|---:|
+| otel-collector | 256MiB | 194MiB |
+| VictoriaLogs | 512MiB | 23MiB |
+| Tempo | 384MiB | 228MiB |
+| VictoriaMetrics | 256MiB | 98MiB |
+| Grafana | 256MiB | 78MiB |
+| **Total limits** | **1664MiB** | **~621MiB used** |
+
+Retention for logs/metrics/traces storage: **3 days**.

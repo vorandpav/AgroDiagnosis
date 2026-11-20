@@ -1,8 +1,10 @@
 """Application API Pydantic contracts and response schemas."""
 
 from enum import StrEnum
+from pathlib import PurePosixPath
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class HelloResponse(BaseModel):
@@ -53,12 +55,57 @@ class HealthReport(BaseModel):
     dependencies: dict[str, DependencyHealth]
 
 
-class ProcessResponse(BaseModel):
-    """Response schema for plant-disease inference."""
+class InferenceResult(BaseModel):
+    """Result of a single model forward pass."""
 
     label: str = Field(description="Predicted plant/disease class.")
     confidence: float = Field(description="Softmax probability of the predicted class.")
-    model: str = Field(description="Loaded Model Registry reference (name@alias).")
+
+
+class TaskAccepted(BaseModel):
+    """Acknowledge that a task was accepted into the inference queue."""
+
+    task_id: UUID
+
+
+class InferenceTask(BaseModel):
+    """Define an inference command for an image in shared storage."""
+
+    task_id: UUID
+    image_path: str = Field(min_length=1, max_length=1024)
+
+    @field_validator("image_path")
+    @classmethod
+    def validate_image_path(cls, value: str) -> str:
+        """Validate a relative POSIX path within task storage."""
+        path = PurePosixPath(value)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError("image_path must be relative to task storage")
+        if "\\" in value or ":" in value or "\x00" in value:
+            raise ValueError("image_path must use portable POSIX path components")
+        return value
+
+
+class TaskResult(BaseModel):
+    """Define the persisted result of task processing."""
+
+    task_id: UUID
+    prediction: InferenceResult
+    model_ref: str = Field(description="Registry reference used for this task (name@alias).")
+    model_version: str = Field(description="Model version used for this task.")
+    processing_seconds: float = Field(ge=0, allow_inf_nan=False)
+
+
+class PublicationReport(BaseModel):
+    """Summarize confirmed publications for a batch."""
+
+    task_count: int = Field(ge=0)
+    elapsed_seconds: float = Field(gt=0, allow_inf_nan=False)
+
+    @property
+    def tasks_per_second(self) -> float:
+        """Return the measured publication rate."""
+        return self.task_count / self.elapsed_seconds
 
 
 class EvaluationRequest(BaseModel):
@@ -66,6 +113,14 @@ class EvaluationRequest(BaseModel):
 
     dataset_name: str = Field(min_length=1, max_length=100, pattern=r"^[\w .-]+$")
     archive: bytes = Field(min_length=1)
+
+
+class EvaluationBatchPrepared(BaseModel):
+    """Images extracted to task storage and ready for queue publication."""
+
+    dataset_name: str
+    dataset_sha256: str
+    tasks: list[InferenceTask] = Field(min_length=1)
 
 
 class EvaluationMetrics(BaseModel):
@@ -100,6 +155,16 @@ class EvaluationReport(BaseModel):
     predictions: list[EvaluationPrediction]
 
 
+class EvaluationTrackingStatus(BaseModel):
+    """Machine-readable outcome of MLflow logging for an evaluation."""
+
+    status: str = Field(description="recorded or unavailable")
+    message: str | None = Field(
+        default=None,
+        description="Human-readable detail when tracking failed after metrics were computed.",
+    )
+
+
 class EvaluationResponse(BaseModel):
     """Response schema containing evaluation metrics and tracking identifiers."""
 
@@ -109,7 +174,10 @@ class EvaluationResponse(BaseModel):
     model: str
     model_version: str
     metrics: EvaluationMetrics
-    run_id: str
+    run_id: str | None = None
+    tracking: EvaluationTrackingStatus = Field(
+        default_factory=lambda: EvaluationTrackingStatus(status="recorded")
+    )
 
 
 class EvaluationError(BaseModel):
@@ -117,3 +185,11 @@ class EvaluationError(BaseModel):
 
     status: str
     message: str
+
+
+class EvaluationFlowResult(BaseModel):
+    """HTTP envelope produced by the evaluation orchestration service."""
+
+    status_code: int
+    response: EvaluationResponse | None = None
+    error: EvaluationError | None = None

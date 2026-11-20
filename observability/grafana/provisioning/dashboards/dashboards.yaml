@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: agrodiagnosis
+    orgId: 1
+    folder: AgroDiagnosis
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
