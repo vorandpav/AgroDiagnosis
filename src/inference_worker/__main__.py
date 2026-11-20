@@ -1,18 +1,17 @@
-"""Run the inference worker: uv run python -m src.inference_worker."""
+"""Runs the inference worker."""
 
 from __future__ import annotations
 
 import asyncio
 
-from src.config import get_settings
+from src import config, logging_config
 from src.inference_worker.consumer import run_inference_worker
-from src.logging_config import setup_logging
 
 
 def main() -> None:
     """Run the inference worker with settings loaded from the environment."""
-    settings = get_settings()
-    setup_logging(settings.log_level)
+    settings = config.get_settings()
+    logging_config.setup_logging(settings.log_level)
     asyncio.run(run_inference_worker(settings))
 
 

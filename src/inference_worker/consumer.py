@@ -11,16 +11,23 @@ from functools import partial
 
 from faststream import FastStream
 from faststream.middlewares import AckPolicy
-from faststream.rabbit import RabbitBroker, RabbitMessage
+from faststream.rabbit import RabbitBroker, RabbitMessage, RabbitQueue
+from uvicorn import Server
 
 from src.config import Settings
-from src.db import close_db_pool, create_db_pool
+from src.db.database import create_database
+from src.db.task_results import initialize_results, save_result
 from src.inference_worker.health import create_health_server
 from src.inference_worker.processing import process_task
-from src.messaging.broker import create_broker, dead_letter_queue, task_queue
+from src.messaging.broker import (
+    create_broker,
+    dead_letter_queue,
+    evaluate_dead_letter_queue,
+    evaluate_task_queue,
+    task_queue,
+)
+from src.mlflow_runtime import load_model
 from src.schemas import InferenceTask, TaskResult
-from src.services.inference import load_model
-from src.tasks.results import initialize_results, save_result
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +50,7 @@ async def recover_failed_delivery(
     task: InferenceTask,
     message: RabbitMessage,
     attempt: int,
+    queue: RabbitQueue,
 ) -> None:
     """Republish with an incremented attempt or reject to DLQ when exhausted."""
     if attempt + 1 >= settings.task_max_delivery_attempts:
@@ -61,7 +69,7 @@ async def recover_failed_delivery(
     await asyncio.sleep(settings.task_retry_delay_seconds)
     await broker.publish(
         task,
-        queue=task_queue(settings),
+        queue=queue,
         message_id=str(task.task_id),
         persist=True,
         headers={_ATTEMPT_HEADER: attempt + 1},
@@ -69,75 +77,120 @@ async def recover_failed_delivery(
     await message.ack()
 
 
-def register_handler(
+def _register_queue_handler(
     broker: RabbitBroker,
     settings: Settings,
+    queue: RabbitQueue,
     execute: Callable[[InferenceTask], Awaitable[TaskResult]],
     save: Callable[[TaskResult], Awaitable[None]],
 ) -> None:
     """Register a manual-ack handler with limited retries then DLQ."""
 
-    @broker.subscriber(task_queue(settings), ack_policy=AckPolicy.MANUAL)
+    @broker.subscriber(queue, ack_policy=AckPolicy.MANUAL)
     async def handle(task: InferenceTask, message: RabbitMessage) -> None:
         """Save the result before ack; republish or DLQ on failure."""
         attempt = delivery_attempt(message)
         try:
             result = await execute(task)
-            await save(result)
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            log.exception("Task %s failed during processing", task.task_id)
-            await recover_failed_delivery(broker, settings, task, message, attempt)
+            log.exception("Task %s failed during inference", task.task_id)
+            await recover_failed_delivery(broker, settings, task, message, attempt, queue)
+            return
+        try:
+            await save(result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Task %s failed while saving result", task.task_id)
+            await recover_failed_delivery(broker, settings, task, message, attempt, queue)
             return
         await message.ack()
         log.info("Task %s saved (%.3fs)", task.task_id, result.processing_seconds)
 
 
+def register_inference_handler(
+    broker: RabbitBroker,
+    settings: Settings,
+    execute: Callable[[InferenceTask], Awaitable[TaskResult]],
+    save: Callable[[TaskResult], Awaitable[None]],
+) -> None:
+    """Register the inference queue consumer."""
+    _register_queue_handler(broker, settings, task_queue(settings), execute, save)
+
+
+def register_evaluate_handler(
+    broker: RabbitBroker,
+    settings: Settings,
+    execute: Callable[[InferenceTask], Awaitable[TaskResult]],
+    save: Callable[[TaskResult], Awaitable[None]],
+) -> None:
+    """Register the evaluation queue consumer."""
+    _register_queue_handler(broker, settings, evaluate_task_queue(settings), execute, save)
+
+
 async def run_inference_worker(settings: Settings) -> None:
-    """Load the model once and release resources after the broker stops."""
-    health = create_health_server(settings.worker_health_host, settings.worker_health_port)
-    health_task = asyncio.create_task(health.serve(), name="inference-worker-health")
-    log.info(
-        "Inference worker health on %s:%s/healthz",
-        settings.worker_health_host,
-        settings.worker_health_port,
-    )
+    """Load the model, then serve health and consume until the broker stops."""
+    health: Server | None = None
+    health_task: asyncio.Task[None] | None = None
     try:
         async with AsyncExitStack() as resources:
             executor = resources.enter_context(
                 ThreadPoolExecutor(max_workers=settings.worker_executor_workers)
             )
+
             loop = asyncio.get_running_loop()
-            model, class_names, model_version = await loop.run_in_executor(
-                executor, load_model, settings
-            )
+
+            model = await loop.run_in_executor(executor, load_model, settings)
+            log.info("Loaded %s version %s", model.model_ref, model.model_version)
+
+            health = create_health_server(settings.worker_health_host, settings.worker_health_port)
+            health_task = asyncio.create_task(health.serve(), name="inference-worker-health")
             log.info(
-                "Loaded %s@%s version %s",
-                settings.mlflow_model_name,
-                settings.mlflow_model_alias,
-                model_version,
+                "Inference worker health on %s:%s/healthz",
+                settings.worker_health_host,
+                settings.worker_health_port,
             )
-            pool = await create_db_pool(settings)
-            resources.push_async_callback(close_db_pool, pool)
-            await initialize_results(pool)
+
+            database = await create_database(settings)
+            resources.push_async_callback(database.close)
+            await database.declare_table(initialize_results)
+            pool = database.pool
+
             broker = create_broker(settings)
 
             async def execute(task: InferenceTask) -> TaskResult:
                 """Run file reads, inference, and the delay in a single executor thread."""
                 return await loop.run_in_executor(
                     executor,
-                    partial(process_task, task, settings, model, class_names, model_version),
+                    partial(
+                        process_task,
+                        task,
+                        settings,
+                        model.model,
+                        model.class_names,
+                        model.model_ref,
+                        model.model_version,
+                    ),
                 )
 
-            register_handler(broker, settings, execute, partial(save_result, pool=pool))
+            save = partial(save_result, pool=pool)
+            register_inference_handler(broker, settings, execute, save)
+            register_evaluate_handler(broker, settings, execute, save)
             app = FastStream(broker)
 
             @app.on_startup
             async def prepare_queue() -> None:
-                """Declare the dead-letter queue before consuming tasks."""
+                """Declare pipeline queues before consuming tasks."""
                 await broker.connect()
                 await broker.declare_queue(dead_letter_queue(settings))
+                await broker.declare_queue(task_queue(settings))
+                await broker.declare_queue(evaluate_dead_letter_queue(settings))
+                await broker.declare_queue(evaluate_task_queue(settings))
 
             await app.run()
     finally:
-        health.should_exit = True
-        await health_task
+        if health is not None and health_task is not None:
+            health.should_exit = True
+            await health_task

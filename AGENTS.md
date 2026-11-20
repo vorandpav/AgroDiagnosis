@@ -52,10 +52,13 @@ except PostgresError as exc:
 ## Слои
 
 ```
-src/api/      — роуты: тонкие вьюхи, FastAPI
-src/services/ — бизнес-логика: функции, Pydantic в → Pydantic из
-src/          — точка сборки, конфиг, логирование, контракты (schemas.py)
-tests/        — тесты: pytest, httpx, один сценарий — одно имя
+src/api/               — роуты + Depends; тонкие вьюхи, FastAPI
+src/services/          — бизнес-логика (Pydantic в → Pydantic из)
+src/db/                — пул Postgres и репозиторий task_results
+src/messaging/         — брокер, очереди, публикация
+src/inference_worker/  — загрузка модели, predict, consumer (не API)
+src/                   — точка сборки, конфиг, логирование, контракты (schemas.py)
+tests/                 — тесты: pytest, httpx, один сценарий — одно имя
 ```
 
 ## Тестирование

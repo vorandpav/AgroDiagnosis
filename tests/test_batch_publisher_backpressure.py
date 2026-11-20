@@ -9,7 +9,7 @@ import pytest
 from aio_pika.exceptions import DeliveryError
 
 from src.config import Settings
-from src.scripts.batch_publisher import publish_manifest
+from src.services.batch_processing import publish_inference_manifest
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ async def test_publish_manifest_retries_after_soft_limit_then_succeeds(
     )
     broker = Mock()
     broker.publish = AsyncMock()
-    report = await publish_manifest(manifest, broker, settings)
+    report = await publish_inference_manifest(manifest, broker, settings)
     assert report.task_count == 1
     assert broker.publish.await_count == 1
     assert sleeps == [settings.publish_retry_delay_seconds]
@@ -67,7 +67,7 @@ async def test_publish_manifest_retries_after_hard_reject_then_succeeds(
     monkeypatch.setattr("src.messaging.publishing.queue_depth", AsyncMock(return_value=0))
     broker = Mock()
     broker.publish = AsyncMock(side_effect=[DeliveryError(Mock(), None), None])
-    report = await publish_manifest(manifest, broker, settings)
+    report = await publish_inference_manifest(manifest, broker, settings)
     assert report.task_count == 1
     assert broker.publish.await_count == 2
     assert sleeps == [settings.publish_retry_delay_seconds]

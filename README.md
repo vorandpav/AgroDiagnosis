@@ -65,8 +65,13 @@ Apple/Apple_scab/image1.jpg
 Cherry/Powdery_mildew/image2.png
 ```
 
-A single enclosing directory such as `test/` is also supported. Class names must
-match `src/class_names.json`.
+A single enclosing directory such as `test/` is also supported. Class labels must
+come from the `class_names.json` artifact on the registered model's training run
+(logged by training); the worker fails to start without it.
+
+Only `inference-worker` calls `load_model` (in `src/mlflow_runtime.py`) and runs
+`predict`: it resolves the Registry alias once at startup and pins that version.
+The API publishes tasks / waits for Postgres results and does not hold model weights.
 
 ## Inference pipeline (backpressure lab)
 
@@ -82,10 +87,13 @@ Code layout (pipeline vs HTTP vs worker):
 | Folder | Role |
 |---|---|
 | `src/messaging/` | Queue definition, publish, soft/hard backpressure |
-| `src/tasks/` | HTTP upload + `task_results` in Postgres |
-| `src/inference_worker/` | FastStream consumer (compose `inference-worker`), thread pool, `/healthz` |
+| `src/services/tasks.py` | Upload → storage + publish |
+| `src/db/` | `Database` pool and `task_results` repository |
+| `src/inference_worker/` | `load_model` / `predict`, FastStream consumer, `/healthz` |
 | `src/scripts/batch_publisher.py` | Batch producer CLI |
-| `src/api/tasks.py` | Routes → `src/tasks/http.py` |
+| `src/api/` | Thin routes via `Depends` → services |
+
+Postgres creates `task_results` from the single `CREATE TABLE` in `initialize_results` on a clean database. After a schema change, drop the Postgres volume and start again; there are no migrations.
 
 ### Run locally
 
@@ -117,7 +125,7 @@ uv run python -m src.scripts.batch_publisher task-data/demo/tasks.jsonl
 
 | Topic | Choice | Why |
 |---|---|---|
-| `prefetch_count` | `= WORKER_EXECUTOR_WORKERS` (default 1) | Never pull more unacked messages than the thread pool can run; larger prefetch would hide backpressure and inflate memory |
+| `prefetch_count` | `= WORKER_EXECUTOR_WORKERS` on the shared channel | Both queues share one prefetch. An empty queue holds no slots; a user task waits only for in-flight work, not for the evaluate backlog |
 | Inference off the loop | `ThreadPoolExecutor` | `torch` / `time.sleep` must not block FastStream; `/healthz` on `:8001` stays responsive under load |
 | Batch vs HTTP | soft limit for batch, hard for everyone | Overnight jobs wait below soft watermark; interactive `POST /tasks` may use the remaining band until hard `reject-publish` → **503 + Retry-After** |
 | `Retry-After` | `ceil(INFERENCE_MIN_SECONDS)` | Approximate time for one busy worker to free a slot |
@@ -125,6 +133,7 @@ uv run python -m src.scripts.batch_publisher task-data/demo/tasks.jsonl
 | Retries → DLQ | `TASK_MAX_DELIVERY_ATTEMPTS` then `reject(requeue=False)` | Bounded retries with header `x-delivery-attempt`, then dead-letter queue |
 | Idempotency | `task_results.task_id` PK + `ON CONFLICT DO NOTHING` | Safe under at-least-once redelivery |
 | Graceful stop | Compose `stop_grace_period: 60s` + SIGTERM | Worker finishes the in-flight message before exit |
+| Model version pin | `load_model` at worker startup | Registry alias resolves once per worker process; results store `model_ref` / `model_version` |
 
 ### Experiment results (§7)
 

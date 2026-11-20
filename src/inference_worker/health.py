@@ -10,7 +10,7 @@ from starlette.routing import Route
 
 
 async def healthz(_request: Request) -> PlainTextResponse:
-    """Return ok while the inference worker event loop is responsive."""
+    """Return ok. The process binds this port only after the model has loaded."""
     return PlainTextResponse("ok")
 
 

@@ -1,7 +1,5 @@
 """Tests for evaluation tracking and model version pinning."""
 
-import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,9 +10,9 @@ from torch import nn
 
 from src.config import Settings
 from src.exceptions import EvaluationTrackingError
+from src.mlflow_runtime import LoadedModel, load_model
 from src.schemas import EvaluationMetrics, EvaluationPrediction, EvaluationReport
 from src.services.evaluation_tracking import record_evaluation
-from src.services.inference import load_model
 
 
 def make_report() -> EvaluationReport:
@@ -87,23 +85,44 @@ def test_record_evaluation_reports_failure_before_run_created() -> None:
 
 
 def test_load_model_pins_resolved_version_instead_of_mutable_alias(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = tracking_client()
     client.get_model_version_by_alias.return_value.version = "7"
     model = nn.Identity()
     loader = MagicMock(return_value=model)
-    monkeypatch.setattr("src.services.inference.probe_mlflow_tracking", lambda uri: None)
-    monkeypatch.setattr("src.services.inference.MlflowClient", lambda **kwargs: client)
-    monkeypatch.setattr("src.services.inference.mlflow.set_tracking_uri", lambda uri: None)
-    monkeypatch.setattr("src.services.inference.mlflow.pytorch.load_model", loader)
-    names = tmp_path / "classes.json"
-    names.write_text(json.dumps(["Apple/healthy"]), encoding="utf-8")
-    monkeypatch.setattr("src.services.inference._CLASS_NAMES_PATH", names)
+    monkeypatch.setattr("src.mlflow_runtime.init_mlflow_tracking", lambda uri: None)
+    monkeypatch.setattr("src.mlflow_runtime.MlflowClient", lambda **kwargs: client)
+    monkeypatch.setattr("src.mlflow_runtime.mlflow.pytorch.load_model", loader)
+    monkeypatch.setattr(
+        "src.mlflow_runtime._class_names_from_run",
+        lambda _client, _version: ["Apple/healthy"],
+    )
     result = load_model(Settings(mlflow_model_name="plants"))
     loader.assert_called_once_with("models:/plants/7")
-    assert result == (model, ["Apple/healthy"], "7")
+    assert result == LoadedModel(model, ["Apple/healthy"], "models:/plants/7", "7")
     assert not model.training
+
+
+def test_load_model_requires_class_names_from_mlflow_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = tracking_client()
+    client.get_model_version_by_alias.return_value.version = "7"
+    client.get_model_version_by_alias.return_value.run_id = "training-run"
+    model = nn.Identity()
+    loader = MagicMock(return_value=model)
+    monkeypatch.setattr("src.mlflow_runtime.init_mlflow_tracking", lambda uri: None)
+    monkeypatch.setattr("src.mlflow_runtime.MlflowClient", lambda **kwargs: client)
+    monkeypatch.setattr("src.mlflow_runtime.mlflow.pytorch.load_model", loader)
+    monkeypatch.setattr(
+        "src.mlflow_runtime._class_names_from_run",
+        lambda _client, _version: (_ for _ in ()).throw(
+            RuntimeError("Failed to load class_names.json from the model training run")
+        ),
+    )
+    with pytest.raises(RuntimeError, match="class_names"):
+        load_model(Settings(mlflow_model_name="plants"))
 
 
 def test_record_evaluation_handles_concurrent_experiment_creation() -> None:

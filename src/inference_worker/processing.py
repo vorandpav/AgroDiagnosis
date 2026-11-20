@@ -5,8 +5,8 @@ import time
 from torch import nn
 
 from src.config import Settings
+from src.inference_worker.predict import predict
 from src.schemas import InferenceTask, TaskResult
-from src.services.inference import predict
 
 
 def process_task(
@@ -14,6 +14,7 @@ def process_task(
     settings: Settings,
     model: nn.Module,
     class_names: list[str],
+    model_ref: str,
     model_version: str,
 ) -> TaskResult:
     """Run synchronous processing with a configured minimum duration."""
@@ -22,16 +23,12 @@ def process_task(
     image_path = (root / task.image_path).resolve()
     if not image_path.is_relative_to(root):
         raise ValueError("Image path is outside task storage")
-    prediction = predict(
-        model,
-        class_names,
-        image_path.read_bytes(),
-        f"{settings.mlflow_model_name}@{settings.mlflow_model_alias}",
-    )
+    prediction = predict(model, class_names, image_path.read_bytes())
     time.sleep(max(0, settings.inference_min_seconds - (time.perf_counter() - started)))
     return TaskResult(
         task_id=task.task_id,
         prediction=prediction,
+        model_ref=model_ref,
         model_version=model_version,
         processing_seconds=time.perf_counter() - started,
     )

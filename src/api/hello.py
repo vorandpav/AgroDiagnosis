@@ -2,8 +2,9 @@
 
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 
+from src.api.deps import SettingsDep
 from src.schemas import HelloResponse
 
 log = logging.getLogger(__name__)
@@ -12,13 +13,8 @@ router = APIRouter()
 
 
 @router.get("/", response_model=HelloResponse)
-async def hello(request: Request) -> HelloResponse:
-    """Returns application greeting and basic metadata.
-
-    Returns:
-        HelloResponse: Payload containing welcome message, app name, and version.
-    """
-    settings = request.app.state.settings
+async def hello(settings: SettingsDep) -> HelloResponse:
+    """Return application greeting and basic metadata."""
     log.info("Root URL requested.")
     return HelloResponse(
         message="Hello, world!",

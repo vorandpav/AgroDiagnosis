@@ -8,7 +8,12 @@ from src.config import Settings
 
 
 def create_broker(settings: Settings) -> RabbitBroker:
-    """Create a broker with publisher confirms and prefetch matching the executor."""
+    """Create a broker whose default channel prefetches one task per worker thread.
+
+    Inference and evaluation subscribers share this channel. A full evaluate
+    queue cannot occupy slots while the user queue is empty, and a user task
+    is not lined up behind the evaluate backlog.
+    """
     return RabbitBroker(
         settings.rabbitmq_url,
         default_channel=Channel(
@@ -36,6 +41,25 @@ def task_queue(settings: Settings) -> RabbitQueue:
 def dead_letter_queue(settings: Settings) -> RabbitQueue:
     """Define the dead-letter queue for the initial pipeline."""
     return RabbitQueue(f"{settings.task_queue}.dlq", durable=True)
+
+
+def evaluate_task_queue(settings: Settings) -> RabbitQueue:
+    """Define the bounded durable queue for evaluation batch workers."""
+    return RabbitQueue(
+        settings.evaluate_task_queue,
+        durable=True,
+        arguments={
+            "x-max-length": settings.task_queue_max_length,
+            "x-overflow": "reject-publish",
+            "x-dead-letter-exchange": "",
+            "x-dead-letter-routing-key": evaluate_dead_letter_queue(settings).name,
+        },
+    )
+
+
+def evaluate_dead_letter_queue(settings: Settings) -> RabbitQueue:
+    """Define the dead-letter queue for evaluation tasks."""
+    return RabbitQueue(f"{settings.evaluate_task_queue}.dlq", durable=True)
 
 
 def retry_after_seconds(settings: Settings) -> int:

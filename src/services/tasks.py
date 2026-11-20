@@ -10,6 +10,7 @@ import asyncpg
 from faststream.rabbit import RabbitBroker
 
 from src.config import Settings
+from src.db import task_results
 from src.exceptions import QueueFullError
 from src.messaging.publishing import publish_inference_task
 from src.schemas import InferenceTask, TaskAccepted, TaskResult
@@ -55,12 +56,6 @@ async def submit_uploaded_task(
     return TaskAccepted(task_id=task_id)
 
 
-async def fetch_task_result(task_id: UUID, pool: asyncpg.Pool) -> TaskResult | None:
+async def get_task_result(task_id: UUID, pool: asyncpg.Pool) -> TaskResult | None:
     """Load a persisted task result, if the worker has written one."""
-    row = await pool.fetchrow(
-        "SELECT payload FROM task_results WHERE task_id = $1",
-        task_id,
-    )
-    if row is None:
-        return None
-    return TaskResult.model_validate_json(row["payload"])
+    return await task_results.fetch_task_result(task_id, pool)

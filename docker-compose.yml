@@ -29,6 +29,7 @@ services:
       MLFLOW_MODEL_ALIAS: ${MLFLOW_MODEL_ALIAS:-champion}
       TASK_STORAGE_DIR: /data
       TASK_QUEUE: ${TASK_QUEUE:-agrodiagnosis.inference.v1}
+      EVALUATE_TASK_QUEUE: ${EVALUATE_TASK_QUEUE:-agrodiagnosis.evaluate.v1}
       TASK_QUEUE_MAX_LENGTH: ${TASK_QUEUE_MAX_LENGTH:-100}
       TASK_QUEUE_SOFT_LIMIT: ${TASK_QUEUE_SOFT_LIMIT:-60}
       INFERENCE_MIN_SECONDS: ${INFERENCE_MIN_SECONDS:-1.0}
@@ -36,7 +37,7 @@ services:
       WORKER_HEALTH_PORT: ${WORKER_HEALTH_PORT:-8001}
       WORKER_EXECUTOR_WORKERS: ${WORKER_EXECUTOR_WORKERS:-1}
     ports:
-      - "127.0.0.1:${WORKER_HEALTH_PORT:-8001}:8001"
+      - "127.0.0.1:${WORKER_HEALTH_PORT:-8001}:${WORKER_HEALTH_PORT:-8001}"
     volumes:
       - ./task-data:/data:ro
     depends_on:
@@ -48,7 +49,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "uv run python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=3)\"",
+          "uv run python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['WORKER_HEALTH_PORT'] + '/healthz', timeout=3)\"",
         ]
       interval: 10s
       timeout: 5s
@@ -101,9 +102,11 @@ services:
       RABBITMQ_URL: "amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/"
       TASK_STORAGE_DIR: /data
       TASK_QUEUE: ${TASK_QUEUE:-agrodiagnosis.inference.v1}
+      EVALUATE_TASK_QUEUE: ${EVALUATE_TASK_QUEUE:-agrodiagnosis.evaluate.v1}
       TASK_QUEUE_MAX_LENGTH: ${TASK_QUEUE_MAX_LENGTH:-100}
       TASK_QUEUE_SOFT_LIMIT: ${TASK_QUEUE_SOFT_LIMIT:-60}
       INFERENCE_MIN_SECONDS: ${INFERENCE_MIN_SECONDS:-1.0}
+      WORKER_HEALTH_URL: http://inference-worker:${WORKER_HEALTH_PORT:-8001}/healthz
     volumes:
       - ./task-data:/data
     ports:
@@ -113,6 +116,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      inference-worker:
+        condition: service_started
     healthcheck:
       test: [ "CMD-SHELL", "uv run python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)\"" ]
       interval: 30s

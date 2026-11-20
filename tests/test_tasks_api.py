@@ -22,10 +22,6 @@ async def tasks_client(
 ) -> AsyncIterator[AsyncClient]:
     """App client with fake broker and temporary task storage."""
     monkeypatch.setenv("TASK_STORAGE_DIR", str(tmp_path))
-    monkeypatch.setattr(
-        "src.services.inference.load_model",
-        lambda _settings: (Mock(), [], "1"),
-    )
     monkeypatch.setattr("src.services.health.probe_mlflow_tracking", lambda _uri: None)
 
     broker = Mock()
@@ -39,9 +35,11 @@ async def tasks_client(
     pool = Mock()
     pool.execute = AsyncMock()
     pool.fetchrow = AsyncMock(return_value=None)
-    monkeypatch.setattr("src.app.db.create_db_pool", AsyncMock(return_value=pool))
-    monkeypatch.setattr("src.app.db.close_db_pool", AsyncMock())
-    monkeypatch.setattr("src.app.initialize_results", AsyncMock())
+    database = Mock()
+    database.pool = pool
+    database.declare_table = AsyncMock()
+    database.close = AsyncMock()
+    monkeypatch.setattr("src.app.create_database", AsyncMock(return_value=database))
 
     async with LifespanManager(app):
         app.state.broker = broker
@@ -123,11 +121,21 @@ async def test_get_tasks_returns_404_until_result_exists(tasks_client: AsyncClie
 
     result = TaskResult(
         task_id=uuid4(),
-        prediction=InferenceResult(label="healthy", confidence=0.9, model="m@champion"),
+        prediction=InferenceResult(label="healthy", confidence=0.9),
+        model_ref="m@champion",
         model_version="1",
         processing_seconds=0.1,
     )
-    app.state.db_pool.fetchrow = AsyncMock(return_value={"payload": result.model_dump_json()})
+    app.state.db_pool.fetchrow = AsyncMock(
+        return_value={
+            "task_id": result.task_id,
+            "label": result.prediction.label,
+            "confidence": result.prediction.confidence,
+            "model_ref": result.model_ref,
+            "model_version": result.model_version,
+            "processing_seconds": result.processing_seconds,
+        }
+    )
     found = await tasks_client.get(f"/api/v1/tasks/{result.task_id}")
     assert found.status_code == 200
     assert found.json()["task_id"] == str(result.task_id)

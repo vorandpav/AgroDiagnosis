@@ -1,8 +1,10 @@
 """Unit tests for health service status calculation logic."""
 
 import urllib.error
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from aio_pika.exceptions import AMQPError, ChannelNotFoundEntity
 
 from src.config import Settings
 from src.schemas import HealthStatus, ReportStatus
@@ -15,6 +17,14 @@ class _DeadPool:
     async def fetchval(self, query: str) -> None:
         """Simulates connection failure upon query execution."""
         raise OSError("Connection refused")
+
+
+class _LivePool:
+    """Mock connection pool simulating a successful PostgreSQL execution."""
+
+    async def fetchval(self, query: str) -> str:
+        """Returns a dummy PostgreSQL version string."""
+        return "PostgreSQL 16.2, compiled by Visual C++"
 
 
 def test_check_application_healthy() -> None:
@@ -30,31 +40,6 @@ async def test_check_postgres_unavailable_on_error() -> None:
     dependency = await health_service.check_postgres(_DeadPool())  # type: ignore[arg-type]
     assert dependency.status is HealthStatus.unavailable
     assert "Postgres is unavailable" in (dependency.detail or "")
-
-
-async def test_build_report_degraded_when_dependency_down(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verifies that an unhealthy dependency sets the aggregate status to degraded."""
-    monkeypatch.setattr(health_service, "probe_mlflow_tracking", lambda _uri: None)
-    report = await health_service.build_report(
-        _DeadPool(),  # type: ignore[arg-type]
-        Settings(),
-        model_loaded=True,
-    )
-    assert report.status is ReportStatus.degraded
-    assert report.dependencies["application"].status is HealthStatus.healthy
-    assert report.dependencies["postgres"].status is HealthStatus.unavailable
-    assert report.dependencies["mlflow"].status is HealthStatus.healthy
-    assert report.dependencies["model"].status is HealthStatus.healthy
-
-
-class _LivePool:
-    """Mock connection pool simulating a successful PostgreSQL execution."""
-
-    async def fetchval(self, query: str) -> str:
-        """Returns a dummy PostgreSQL version string."""
-        return "PostgreSQL 16.2, compiled by Visual C++"
 
 
 async def test_check_postgres_healthy_on_success() -> None:
@@ -87,23 +72,91 @@ async def test_check_mlflow_unavailable_when_tracking_down(
     assert "MLflow Tracking Server is unavailable" in (dependency.detail or "")
 
 
-def test_check_model_healthy_when_loaded() -> None:
-    """Verifies model dependency is healthy when the model is in memory."""
-    settings = Settings(
-        mlflow_model_name="agrodiagnosis-plant-disease",
-        mlflow_model_alias="champion",
-    )
-    dependency = health_service.check_model(settings, model_loaded=True)
+async def test_check_rabbitmq_healthy_when_both_queues_reachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    depth = AsyncMock(side_effect=[3, 4])
+    monkeypatch.setattr(health_service, "queue_depth", depth)
+    settings = Settings()
+    broker = Mock()
+    dependency = await health_service.check_rabbitmq(broker, settings)
     assert dependency.status is HealthStatus.healthy
-    assert dependency.detail == "agrodiagnosis-plant-disease@champion loaded"
+    detail = dependency.detail or ""
+    assert f"queue {settings.task_queue} depth=3" in detail
+    assert f"queue {settings.evaluate_task_queue} depth=4" in detail
+    assert depth.await_args_list[0].args == (broker, settings.task_queue)
+    assert depth.await_args_list[1].args == (broker, settings.evaluate_task_queue)
 
 
-def test_check_model_unavailable_when_missing() -> None:
-    """Verifies model dependency is unavailable when nothing was loaded."""
-    settings = Settings(
-        mlflow_model_name="agrodiagnosis-plant-disease",
-        mlflow_model_alias="champion",
+async def test_check_rabbitmq_unavailable_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        health_service,
+        "queue_depth",
+        AsyncMock(side_effect=ConnectionError("broker down")),
     )
-    dependency = health_service.check_model(settings, model_loaded=False)
+    dependency = await health_service.check_rabbitmq(Mock(), Settings())
     assert dependency.status is HealthStatus.unavailable
-    assert "agrodiagnosis-plant-disease@champion is not loaded" in (dependency.detail or "")
+    assert "RabbitMQ is unavailable" in (dependency.detail or "")
+
+
+async def test_check_rabbitmq_unavailable_on_amqp_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        health_service,
+        "queue_depth",
+        AsyncMock(side_effect=AMQPError("connection closed")),
+    )
+    dependency = await health_service.check_rabbitmq(Mock(), Settings())
+    assert dependency.status is HealthStatus.unavailable
+    assert dependency.detail == "RabbitMQ is unavailable"
+
+
+async def test_check_rabbitmq_unavailable_when_evaluate_queue_probe_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    depth = AsyncMock(side_effect=[2, ChannelNotFoundEntity("missing evaluate queue")])
+    monkeypatch.setattr(health_service, "queue_depth", depth)
+    settings = Settings()
+    dependency = await health_service.check_rabbitmq(Mock(), settings)
+    assert dependency.status is HealthStatus.unavailable
+    assert dependency.detail == "RabbitMQ is unavailable"
+    assert depth.await_count == 2
+
+
+async def test_check_worker_healthy_when_healthz_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(health_service, "probe_worker_health", lambda _url: None)
+    settings = Settings(worker_health_url="http://127.0.0.1:8001/healthz")
+    dependency = await health_service.check_worker(settings)
+    assert dependency.status is HealthStatus.healthy
+    assert "8001/healthz" in (dependency.detail or "")
+
+
+async def test_check_worker_unavailable_when_healthz_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise(_url: str) -> None:
+        raise urllib.error.URLError("Connection refused")
+
+    monkeypatch.setattr(health_service, "probe_worker_health", _raise)
+    dependency = await health_service.check_worker(Settings())
+    assert dependency.status is HealthStatus.unavailable
+    assert "Inference worker is unavailable" in (dependency.detail or "")
+
+
+async def test_build_report_degraded_when_dependency_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifies that an unhealthy dependency sets the aggregate status to degraded."""
+    monkeypatch.setattr(health_service, "probe_mlflow_tracking", lambda _uri: None)
+    monkeypatch.setattr(health_service, "queue_depth", AsyncMock(return_value=0))
+    monkeypatch.setattr(health_service, "probe_worker_health", lambda _url: None)
+    report = await health_service.build_report(
+        _DeadPool(),  # type: ignore[arg-type]
+        Settings(),
+        Mock(),
+    )
+    assert report.status is ReportStatus.degraded
+    assert report.dependencies["application"].status is HealthStatus.healthy
+    assert report.dependencies["postgres"].status is HealthStatus.unavailable
+    assert report.dependencies["mlflow"].status is HealthStatus.healthy
+    assert report.dependencies["rabbitmq"].status is HealthStatus.healthy
+    assert report.dependencies["worker"].status is HealthStatus.healthy

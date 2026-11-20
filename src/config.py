@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     )
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
     task_queue: str = "agrodiagnosis.inference.v1"
+    evaluate_task_queue: str = Field(
+        default="agrodiagnosis.evaluate.v1",
+        description="Bounded queue for evaluation batch image tasks.",
+    )
     task_queue_max_length: int = Field(
         default=100,
         gt=0,
@@ -83,6 +87,12 @@ class Settings(BaseSettings):
         allow_inf_nan=False,
         description="Delay before republishing a failed task for another attempt.",
     )
+    evaluation_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        allow_inf_nan=False,
+        description="Shared deadline for evaluation publish backoff and result polling.",
+    )
     worker_health_host: str = "0.0.0.0"
     worker_health_port: int = Field(
         default=8001,
@@ -90,10 +100,17 @@ class Settings(BaseSettings):
         lt=65536,
         description="HTTP port for inference-worker /healthz during processing.",
     )
+    worker_health_url: str = Field(
+        default="http://127.0.0.1:8001/healthz",
+        description="URL the API probes to see if an inference worker is alive.",
+    )
     worker_executor_workers: int = Field(
         default=1,
         ge=1,
-        description="Thread pool size; must match broker prefetch_count.",
+        description=(
+            "Shared inference thread pool and the shared consume prefetch. "
+            "Both queues use this many in-flight tasks together."
+        ),
     )
 
     @model_validator(mode="after")

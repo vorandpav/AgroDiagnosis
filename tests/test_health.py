@@ -25,6 +25,8 @@ async def test_health_report_degraded_when_postgres_unavailable(client: AsyncCli
     assert body["status"] == "degraded"
     assert body["dependencies"]["postgres"]["status"] == "unavailable"
     assert body["dependencies"]["mlflow"]["status"] == "healthy"
-    assert body["dependencies"]["model"]["status"] == "healthy"
+    assert body["dependencies"]["rabbitmq"]["status"] == "healthy"
+    assert body["dependencies"]["worker"]["status"] == "healthy"
     assert body["dependencies"]["application"]["status"] == "healthy"
+    assert "model" not in body["dependencies"]
     assert "agrodiagnosis" in body["dependencies"]["application"]["detail"]

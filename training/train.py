@@ -182,6 +182,7 @@ def train_and_log(
 
         model_to_log = model.cpu()
         example = torch.randn(1, 3, image_size[0], image_size[1])
+        mlflow.log_dict({"class_names": bundle.class_names}, "class_names.json")
         model_info = mlflow.pytorch.log_model(
             model_to_log,
             name=model_name,
